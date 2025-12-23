@@ -36,11 +36,14 @@ from flask import request
 
 @app.after_request
 def add_header(response):
-    """Add headers to prevent caching for API/HTML, but allow for Static."""
-    if 'static' not in request.url:
-        response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
-        response.headers['Pragma'] = 'no-cache'
-        response.headers['Expires'] = '0'
+    """Add headers to prevent caching for API/HTML, but allow for Static/Sitemaps."""
+    # Allow caching for static files, sitemap, and robots.txt
+    if 'static' in request.url or 'sitemap' in request.url or 'robots.txt' in request.url:
+        return response
+        
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
     return response
 
 # Background Cleanup Task
