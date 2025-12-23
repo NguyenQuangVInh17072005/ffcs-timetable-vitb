@@ -22,8 +22,8 @@ class Registration(db.Model):
     def to_dict(self):
         slot_data = self.slot.to_dict() if self.slot else None
         return {
-            'id': self.id,
-            'slot_id': self.slot_id,
+            'id': str(self.id),
+            'slot_id': str(self.slot_id),
             'slot': slot_data,
             'registered_at': self.registered_at.isoformat() if self.registered_at else None
         }

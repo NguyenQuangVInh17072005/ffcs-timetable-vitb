@@ -20,11 +20,11 @@ class Slot(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
+            'id': str(self.id),
             'slot_code': self.slot_code,
-            'course_id': self.course_id,
+            'course_id': str(self.course_id),
             'course': self.course.to_dict() if self.course else None,
-            'faculty_id': self.faculty_id,
+            'faculty_id': str(self.faculty_id),
             'faculty_name': self.faculty.name if self.faculty else None,
             'venue': self.venue,
             'available_seats': self.available_seats,

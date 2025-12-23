@@ -15,8 +15,8 @@ class Course(db.Model):
     p = db.Column(db.Integer, default=0)  # Practical hours
     j = db.Column(db.Integer, default=0)  # Project hours
     c = db.Column(db.Integer, default=0)  # Total credits
-    course_type = db.Column(db.String(20), nullable=False)  # LT, ETH, ELA, etc.
-    category = db.Column(db.String(20), nullable=False)  # UENSE, PC, etc.
+    course_type = db.Column(db.String(100), nullable=False)  # LT, ETH, ELA, etc.
+    category = db.Column(db.String(50), nullable=False)  # UENSE, PC, etc.
     
     # Ownership
     user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
@@ -31,7 +31,7 @@ class Course(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
+            'id': str(self.id),
             'code': self.code,
             'name': self.name,
             'l': self.l,

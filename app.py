@@ -35,7 +35,7 @@ def add_header(response):
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from models import Course
+from models import Course, User
 
 import os
 
@@ -43,25 +43,41 @@ def _perform_cleanup_logic():
     """Core cleanup logic to delete old guest data."""
     try:
         with app.app_context():
-            # Define cutoff time (24 hours ago)
+            # Define cutoff time (7 days ago for weekly reset)
             # Use timezone-aware UTC
-            cutoff = datetime.now(datetime.UTC) - timedelta(hours=24)
+            cutoff = datetime.now(timezone.utc) - timedelta(days=7)
             
-            # Find old guest courses
-            old_courses = Course.query.filter(
+            deleted_count = 0
+            
+            # 1. Delete old User accounts (cascades to Registrations)
+            old_users = User.query.filter(User.created_at < cutoff).all()
+            if old_users:
+                print(f"[{datetime.now()}] Cleanup: Deleting {len(old_users)} old users...")
+                for user in old_users:
+                    db.session.delete(user)
+                    deleted_count += 1
+            
+            # 2. Delete old Guest courses (Users courses are deleted via cascade above if user is deleted, 
+            #    but we might want to clean up courses for users who haven't expired yet? 
+            #    User asked to reset data after one week. If user is > 1 week, they go. 
+            #    If user is < 1 week, their data stays. This fits 'reset after one week'.
+            #    So we just need to handle Guest courses explicitly.)
+            old_guest_courses = Course.query.filter(
                 Course.guest_id.isnot(None), 
                 Course.created_at < cutoff
             ).all()
             
-            if old_courses:
-                count = len(old_courses)
-                print(f"[{datetime.now()}] Cleanup: Deleting {count} orphaned guest courses...")
-                for course in old_courses:
+            if old_guest_courses:
+                print(f"[{datetime.now()}] Cleanup: Deleting {len(old_guest_courses)} old guest courses...")
+                for course in old_guest_courses:
                     db.session.delete(course)
-                
+                    deleted_count += 1
+            
+            if deleted_count > 0:
                 db.session.commit()
-                print(f"[{datetime.now()}] Cleanup complete.")
-                return count
+                print(f"[{datetime.now()}] Cleanup complete. Total items deleted: {deleted_count}")
+                return deleted_count
+            
             return 0
     except Exception as e:
         print(f"Cleanup error: {e}")

@@ -18,7 +18,7 @@ class Faculty(db.Model):
     
     def to_dict(self):
         return {
-            'id': self.id,
+            'id': str(self.id),
             'name': self.name,
             'department': self.department
         }

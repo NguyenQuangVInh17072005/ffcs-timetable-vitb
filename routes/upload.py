@@ -19,8 +19,8 @@ def parse_html_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
     
-    if not file.filename.endswith('.html') and not file.filename.endswith('.htm'):
-        return jsonify({'error': 'File must be HTML'}), 400
+    if not file.filename.lower().endswith(('.html', '.htm', '.mhtml')):
+        return jsonify({'error': 'File must be HTML or MHTML'}), 400
     
     try:
         html_content = file.read().decode('utf-8')
@@ -53,8 +53,8 @@ def import_html_file():
     if file.filename == '':
         return jsonify({'error': 'No file selected'}), 400
     
-    if not file.filename.endswith('.html') and not file.filename.endswith('.htm'):
-        return jsonify({'error': 'File must be HTML'}), 400
+    if not file.filename.lower().endswith(('.html', '.htm', '.mhtml')):
+        return jsonify({'error': 'File must be HTML or MHTML'}), 400
         
     # Determine owner
     user_id = session.get('user_id')

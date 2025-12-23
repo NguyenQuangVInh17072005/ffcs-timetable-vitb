@@ -13,7 +13,7 @@ class User(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     
     # Relationship to registrations
-    registrations = db.relationship('Registration', backref='user', lazy='dynamic')
+    registrations = db.relationship('Registration', backref='user', lazy='dynamic', cascade='all, delete-orphan')
 
     def __repr__(self):
         return f'<User {self.email}>'

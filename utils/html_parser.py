@@ -15,6 +15,23 @@ def parse_vtop_html(html_content):
     Returns:
         dict containing course info and list of slots
     """
+    # Pre-process: Handle MHTML / Quoted-Printable
+    if 'Content-Transfer-Encoding: quoted-printable' in html_content or 'MIME-Version:' in html_content:
+        import quopri
+        
+        # Decode quoted-printable
+        try:
+            # Convert to bytes, decode, then back to string
+            decoded_bytes = quopri.decodestring(html_content.encode('utf-8'))
+            html_content = decoded_bytes.decode('utf-8', errors='ignore')
+        except Exception as e:
+            print(f"MHTML Decode Warning: {e}")
+
+    # Strip headers looking for doctype or html tag
+    match = re.search(r'(<!DOCTYPE html>|<html)', html_content, re.IGNORECASE)
+    if match:
+        html_content = html_content[match.start():]
+
     soup = BeautifulSoup(html_content, 'html.parser')
     
     result = {

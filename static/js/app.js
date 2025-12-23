@@ -56,7 +56,7 @@ async function searchCourses() {
         }
 
         resultsDiv.innerHTML = data.courses.map(course => `
-            <div class="search-result-item" onclick="selectCourse(${course.id})">
+            <div class="search-result-item" onclick="selectCourse('${course.id}')">
                 <div class="course-code">${course.code}</div>
                 <div class="course-name">${course.name}</div>
                 <div class="course-credits">Credits: ${course.c} (${course.ltpjc})</div>
@@ -128,7 +128,7 @@ function showFacultyModal(course, slots) {
                     <td>
                         ${isFull ?
                     '<span class="full-label">Full</span>' :
-                    `<input type="radio" name="slotSelection" value="${slot.id}" onchange="selectSlot(${slot.id})">
+                    `<input type="radio" name="slotSelection" value="${slot.id}" onchange="selectSlot('${slot.id}')">
                              <span class="available-seats ${seatsClass}">${slot.available_seats}</span>`
                 }
                     </td>
@@ -407,10 +407,10 @@ async function loadRegisteredCoursesList() {
                             <td>${reg.slot?.faculty_name || 'TBA'}</td>
                             <td>${reg.slot?.course?.c || 0}</td>
                             <td>
-                                <button class="edit-btn" onclick="openEditRegistrationModal(${reg.slot?.course?.id}, ${reg.id})" title="Edit Slot/Faculty">
+                                <button class="edit-btn" onclick="openEditRegistrationModal('${reg.slot?.course?.id}', '${reg.id}')" title="Edit Slot/Faculty">
                                     <i class="fas fa-edit"></i>
                                 </button>
-                                <button class="delete-btn" onclick="deleteRegistration(${reg.id})" title="Remove">
+                                <button class="delete-btn" onclick="deleteRegistration('${reg.id}')" title="Remove">
                                     <i class="fas fa-trash"></i>
                                 </button>
                             </td>
@@ -488,7 +488,7 @@ function viewRegisteredCourses() {
                                 <td>${reg.slot?.venue || 'N/A'}</td>
                                 <td>${reg.slot?.course?.c || 0}</td>
                                 <td>
-                                    <button class="delete-btn" onclick="deleteRegistration(${reg.id}); closeRegisteredModal();">
+                                    <button class="delete-btn" onclick="deleteRegistration('${reg.id}'); closeRegisteredModal();">
                                         <i class="fas fa-trash"></i> Remove
                                     </button>
                                 </td>
@@ -553,10 +553,10 @@ function viewAllCourses() {
                                 <td>${course.ltpjc}</td>
                                 <td>${course.course_type || '-'}</td>
                                 <td>
-                                    <button class="btn btn-primary btn-sm" onclick="selectCourse(${course.id}); closeAllCoursesModal();">
+                                    <button class="btn btn-primary btn-sm" onclick="selectCourse('${course.id}'); closeAllCoursesModal();">
                                         <i class="fas fa-plus"></i> Add
                                     </button>
-                                    <button class="btn btn-danger btn-sm" onclick="deleteCourse(${course.id}, '${course.code}');" style="margin-left: 5px;">
+                                    <button class="btn btn-danger btn-sm" onclick="deleteCourse('${course.id}', '${course.code}');" style="margin-left: 5px;">
                                         <i class="fas fa-trash"></i>
                                     </button>
                                 </td>
