@@ -26,8 +26,13 @@ def sitemap_xml():
     # })
     
     # Render XML
+    # Render XML
     sitemap_xml_content = render_template('sitemap.xml', pages=pages)
-    return Response(sitemap_xml_content.strip(), mimetype='application/xml')
+    
+    from flask import make_response
+    response = make_response(sitemap_xml_content.strip())
+    response.headers['Content-Type'] = 'application/xml; charset=utf-8'
+    return response
 
 @sitemap_bp.route('/sitemap')
 def sitemap_html():
