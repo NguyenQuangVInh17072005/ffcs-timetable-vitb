@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, session
 from models import db, Registration, Slot, User
-from models.slot import get_slot_timing, LUNCH_CLASH_PAIRS
+from models.slot import get_slot_timing
 
 registration_bp = Blueprint('registration', __name__)
 
