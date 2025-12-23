@@ -27,12 +27,15 @@ def sitemap_xml():
     
     # Render XML
     # Render XML
-    sitemap_xml_content = render_template('sitemap.xml', pages=pages)
+    try:
+        sitemap_xml_content = render_template('sitemap.xml', pages=pages)
+        if not sitemap_xml_content:
+            sitemap_xml_content = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
+    except Exception as e:
+        print(f"Error rendering sitemap: {e}")
+        sitemap_xml_content = '<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"></urlset>'
     
-    from flask import make_response
-    response = make_response(sitemap_xml_content.strip())
-    response.headers['Content-Type'] = 'application/xml; charset=utf-8'
-    return response
+    return Response(sitemap_xml_content.strip(), mimetype='application/xml')
 
 @sitemap_bp.route('/sitemap')
 def sitemap_html():
