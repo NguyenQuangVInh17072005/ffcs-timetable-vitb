@@ -34,40 +34,57 @@ def add_header(response):
 # Background Cleanup Task
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from models import Course
 
-def cleanup_orphaned_data():
-    """Delete guest data older than 24 hours."""
-    while True:
-        try:
-            with app.app_context():
-                # Define cutoff time (24 hours ago)
-                cutoff = datetime.utcnow() - timedelta(hours=24)
-                
-                # Find old guest courses
-                old_courses = Course.query.filter(
-                    Course.guest_id.isnot(None), 
-                    Course.created_at < cutoff
-                ).all()
-                
-                if old_courses:
-                    print(f"[{datetime.now()}] Cleanup: Deleting {len(old_courses)} orphaned guest courses...")
-                    for course in old_courses:
-                        db.session.delete(course)
-                    
-                    db.session.commit()
-                    print(f"[{datetime.now()}] Cleanup complete.")
-                
-        except Exception as e:
-            print(f"Cleanup error: {e}")
+import os
+
+def _perform_cleanup_logic():
+    """Core cleanup logic to delete old guest data."""
+    try:
+        with app.app_context():
+            # Define cutoff time (24 hours ago)
+            # Use timezone-aware UTC
+            cutoff = datetime.now(datetime.UTC) - timedelta(hours=24)
             
+            # Find old guest courses
+            old_courses = Course.query.filter(
+                Course.guest_id.isnot(None), 
+                Course.created_at < cutoff
+            ).all()
+            
+            if old_courses:
+                count = len(old_courses)
+                print(f"[{datetime.now()}] Cleanup: Deleting {count} orphaned guest courses...")
+                for course in old_courses:
+                    db.session.delete(course)
+                
+                db.session.commit()
+                print(f"[{datetime.now()}] Cleanup complete.")
+                return count
+            return 0
+    except Exception as e:
+        print(f"Cleanup error: {e}")
+        return -1
+
+def cleanup_orphaned_data():
+    """Background thread loop for local development."""
+    while True:
+        _perform_cleanup_logic()
         # Run every hour (3600 seconds)
         time.sleep(3600)
 
-# Start cleanup thread
-cleanup_thread = threading.Thread(target=cleanup_orphaned_data, daemon=True)
-cleanup_thread.start()
+@app.route('/api/cron/cleanup')
+def trigger_cleanup():
+    """Endpoint for Serverless Cron Jobs."""
+    count = _perform_cleanup_logic()
+    return {'status': 'success', 'deleted_count': count}
+
+# Start cleanup thread ONLY if not on Vercel
+# Vercel serverless functions cannot handle background threads (they timeout/crash)
+if not os.environ.get('VERCEL'):
+    cleanup_thread = threading.Thread(target=cleanup_orphaned_data, daemon=True)
+    cleanup_thread.start()
 
 if __name__ == '__main__':
     app.run(debug=True, port=5000)
