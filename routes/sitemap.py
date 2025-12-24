@@ -37,16 +37,7 @@ def sitemap_xml():
     
     return Response(sitemap_xml_content.strip(), mimetype='application/xml')
 
-@sitemap_bp.route('/sitemap')
-def sitemap_html():
-    """Generates an HTML sitemap for users."""
-    links = []
-    
-    links.append({'title': 'Home', 'url': url_for('main.index')})
-    links.append({'title': 'Login', 'url': url_for('auth.login')})
-    # Add more if needed, e.g. from dynamic content if applicable later
-    
-    return render_template('sitemap.html', links=links)
+
 
 @sitemap_bp.route('/robots.txt')
 def robots_txt():

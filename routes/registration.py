@@ -158,6 +158,37 @@ def check_clash():
     result = check_slot_clashes(slot, exclude_reg_id=exclude_reg_id)
     return jsonify(result)
 
+@registration_bp.route('/check-clash-batch', methods=['POST'])
+def check_clash_batch():
+    """Check clashes for multiple slots in one go."""
+    data = request.get_json()
+    slot_ids = data.get('slot_ids', [])
+    exclude_reg_id = data.get('exclude_reg_id')
+    
+    if not slot_ids:
+        return jsonify({'results': {}})
+        
+    # Get all slots in one query to avoid N+1 inside the loop if possible
+    # But check_slot_clashes takes a slot object. 
+    # Let's fetch all slots first.
+    slots = Slot.query.filter(Slot.id.in_(slot_ids)).all()
+    
+    results = {}
+    
+    # We could optimize check_slot_clashes to take a list of slots too, 
+    # but for now iterating here is still way better than N HTTP requests.
+    # The expensive part of check_slot_clashes is `get_current_registrations_query()`, 
+    # which we can cache/fetch once here.
+    
+    # Optimization: Fetch registrations ONCE
+    query = get_current_registrations_query()
+    registrations = query.all() if query else []
+
+    for slot in slots:
+        results[slot.id] = check_slot_clashes(slot, exclude_reg_id=exclude_reg_id, existing_registrations=registrations)
+
+    return jsonify({'results': results})
+
 
 @registration_bp.route('/credits', methods=['GET'])
 def get_credits():
@@ -182,16 +213,26 @@ from models.slot import get_slot_timing
 
 # ... (omitted)
 
-def check_slot_clashes(new_slot, exclude_reg_id=None):
+def check_slot_clashes(new_slot, exclude_reg_id=None, existing_registrations=None):
     """Check if a new slot clashes with existing registrations."""
     # Get all individual slots from the new slot
     new_individual_slots = new_slot.get_individual_slots()
     
     # Get all registered slots for current user/guest
-    query = get_current_registrations_query()
-    registrations = query.all() if query else []
+    if existing_registrations is None:
+        query = get_current_registrations_query()
+        registrations = query.all() if query else []
+    else:
+        registrations = existing_registrations
     
     clashing_slots = []
+    
+    
+    # Mutual Exclusion Groups
+    GROUP_C1 = {'C11', 'C12', 'C13'}
+    GROUP_A2 = {'A21', 'A22', 'A23'}
+    
+    new_slots_set = set(new_individual_slots)
     
     for reg in registrations:
         # Exclude specified registration (for updates)
@@ -200,6 +241,23 @@ def check_slot_clashes(new_slot, exclude_reg_id=None):
 
         if reg.slot:
             registered_individual_slots = reg.slot.get_individual_slots()
+            reg_slots_set = set(registered_individual_slots)
+            
+            # --- Mutual Exclusion Check ---
+            # Check if one set has any C1 slots and the other has any A2 slots
+            has_new_C1 = not new_slots_set.isdisjoint(GROUP_C1)
+            has_new_A2 = not new_slots_set.isdisjoint(GROUP_A2)
+            
+            has_reg_C1 = not reg_slots_set.isdisjoint(GROUP_C1)
+            has_reg_A2 = not reg_slots_set.isdisjoint(GROUP_A2)
+            
+            if (has_new_C1 and has_reg_A2) or (has_new_A2 and has_reg_C1):
+                 clashing_slots.append({
+                    'slot_code': reg.slot.slot_code,
+                    'course_code': reg.slot.course.code if reg.slot.course else '',
+                    'course_name': reg.slot.course.name if reg.slot.course else '',
+                    'reason': 'Mutual exclusion: C1 slots (C11, C12, C13) cannot be taken with A2 slots (A21, A22, A23)'
+                })
             
             # Check for overlap
             for new_s in new_individual_slots:

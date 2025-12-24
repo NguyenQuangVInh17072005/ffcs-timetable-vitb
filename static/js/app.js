@@ -119,17 +119,31 @@ function showFacultyModal(course, slots) {
             const isFull = slot.is_full;
             const seatsClass = slot.available_seats < 20 ? 'low' : '';
 
+            const isCurrentSlot = currentEditingRegistrationId && String(slot.id) === String(currentEditingSlotId);
+            const rowClass = isFull ? 'clash-row' : (isCurrentSlot ? 'current-slot-row' : '');
+
+            // Inline style for current slot if no CSS class yet, or we can add one. 
+            // Let's rely on adding a class 'current-slot-row' and maybe a small inline style for safety if allowed,
+            // or better yet, inject the style logic.
+            // Let's stick to adding a class and I'll add the CSS next. 
+
             return `
-                <tr class="${isFull ? 'clash-row' : ''}" data-slot-id="${slot.id}">
-                    <td class="slot-code">${slot.slot_code}</td>
+                <tr class="${rowClass}" data-slot-id="${slot.id}" style="${isCurrentSlot ? 'background-color: #d1e7dd;' : ''}">
+                    <td class="slot-code">
+                        ${slot.slot_code}
+                        ${isCurrentSlot ? '<span class="badge bg-success" style="font-size: 0.7em; margin-left: 5px;">Current</span>' : ''}
+                    </td>
                     <td class="venue">${slot.venue}</td>
                     <td class="faculty-name">${slot.faculty_name || 'TBA'}</td>
                     <td class="clash-status" id="clash-${slot.id}"></td>
                     <td>
                         ${isFull ?
                     '<span class="full-label">Full</span>' :
-                    `<input type="radio" name="slotSelection" value="${slot.id}" onchange="selectSlot('${slot.id}')">
-                             <span class="available-seats ${seatsClass}">${slot.available_seats}</span>`
+                    (isCurrentSlot ?
+                        '<span class="text-success"><i class="fas fa-check-circle"></i> Registered</span>' :
+                        `<input type="radio" name="slotSelection" value="${slot.id}" onchange="selectSlot('${slot.id}')">
+                         <span class="available-seats ${seatsClass}">${slot.available_seats}</span>`
+                    )
                 }
                     </td>
                 </tr>
@@ -145,26 +159,50 @@ function showFacultyModal(course, slots) {
 }
 
 async function checkClashesForSlots(slots) {
-    const checkPromises = slots.map(async (slot) => {
-        try {
-            const response = await fetch('/api/registration/check-clash', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ slot_id: slot.id })
-            });
-            const data = await response.json();
+    if (slots.length === 0) return;
+
+    try {
+        const slotIds = slots.map(s => s.id);
+        const response = await fetch('/api/registration/check-clash-batch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                slot_ids: slotIds,
+                exclude_reg_id: currentEditingRegistrationId
+            })
+        });
+
+        const data = await response.json();
+        const results = data.results || {};
+
+        // Update UI for each slot
+        slots.forEach(slot => {
+            const slotResult = results[slot.id];
 
             const clashCell = document.getElementById(`clash-${slot.id}`);
-            if (clashCell && data.has_clash) {
-                clashCell.textContent = data.clashing_slots.map(c => c.course_code).join(', ');
-                clashCell.closest('tr').classList.add('clash-row');
-            }
-        } catch (error) {
-            console.error('Error checking clash:', error);
-        }
-    });
+            const row = clashCell ? clashCell.closest('tr') : null;
 
-    await Promise.all(checkPromises);
+            // Clear previous state first just in case
+            if (clashCell) clashCell.textContent = '';
+            // Don't remove class yet, might interfere with other logic? 
+            // Actually usually we just append, but here we process all.
+            // If we re-open modal, it rebuilds HTML anyway.
+
+            if (slotResult && slotResult.has_clash) {
+                if (clashCell) {
+                    clashCell.textContent = slotResult.clashing_slots.map(c => c.course_code).join(', ');
+                }
+                if (row) row.classList.add('clash-row');
+            } else if (currentEditingRegistrationId && row) {
+                // Logic for current editing slot visual is handled in HTML generation mostly,
+                // but we can ensure it's not marked as clash
+                row.classList.remove('clash-row');
+            }
+        });
+
+    } catch (error) {
+        console.error('Error checking clashes batch:', error);
+    }
 }
 
 function selectSlot(slotId) {
@@ -181,6 +219,11 @@ function closeFacultyModal() {
     document.getElementById('facultyModal').classList.remove('active');
     selectedCourse = null;
     selectedSlotId = null;
+    // Note: currentEditingRegistrationId is global and might need reset here too if not shared with others?
+    // Actually closeFacultyModal is called after registration success or just closing the modal.
+    // Let's reset the edit states here too to be safe.
+    currentEditingRegistrationId = null;
+    currentEditingSlotId = null;
 }
 
 async function registerSlot(slotId) {
@@ -197,58 +240,73 @@ async function registerSlot(slotId) {
         return;
     }
 
-    if (currentEditingRegistrationId) {
-        await updateRegistration(finalSlotId, currentEditingRegistrationId);
+    setRegisterButtonLoading(true);
+
+    try {
+        if (currentEditingRegistrationId) {
+            await updateRegistration(finalSlotId, currentEditingRegistrationId);
+        } else {
+            await createNewRegistration(finalSlotId);
+        }
+    } catch (error) {
+        // Only reset if error, success reloads page
+        setRegisterButtonLoading(false);
+        console.error("Registration flow error:", error);
+    }
+}
+
+function setRegisterButtonLoading(isLoading) {
+    // The Register button in the modal footer
+    const btn = document.querySelector('#facultyModal .modal-footer .btn-primary');
+    if (!btn) return;
+
+    if (isLoading) {
+        btn.disabled = true;
+        btn.dataset.originalText = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
     } else {
-        await createNewRegistration(finalSlotId);
+        btn.disabled = false;
+        btn.innerHTML = btn.dataset.originalText || 'Register';
     }
 }
 
 async function createNewRegistration(slotId) {
-    try {
-        const response = await fetch('/api/registration/', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slot_id: slotId })
-        });
+    // try-catch handled by wrapper registerSlot
+    const response = await fetch('/api/registration/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot_id: slotId })
+    });
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok) {
-            closeFacultyModal();
-            // Reload to show updated timetable grid
-            location.reload();
-        } else {
-            alert(data.error || 'Registration failed.');
-        }
-
-    } catch (error) {
-        console.error('Registration error details:', error);
-        alert('Error registering course: ' + error.message);
+    if (response.ok) {
+        closeFacultyModal();
+        // Reload to show updated timetable grid
+        location.reload();
+    } else {
+        alert(data.error || 'Registration failed.');
+        throw new Error(data.error || 'Registration failed.'); // Propagate error
     }
 }
 
 async function updateRegistration(slotId, regId) {
-    try {
-        const response = await fetch(`/api/registration/${regId}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ slot_id: slotId })
-        });
+    // try-catch handled by wrapper registerSlot
+    const response = await fetch(`/api/registration/${regId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ slot_id: slotId })
+    });
 
-        const data = await response.json();
+    const data = await response.json();
 
-        if (response.ok) {
-            closeFacultyModal();
-            // Reload to show updated timetable grid
-            location.reload();
-        } else {
-            alert(data.error || 'Update failed');
-        }
-
-    } catch (error) {
-        console.error('Update error details:', error);
-        alert('Error updating registration: ' + error.message);
+    if (response.ok) {
+        closeFacultyModal();
+        // Reload to show updated timetable grid
+        location.reload();
+    } else {
+        alert(data.error || 'Update failed');
+        throw new Error(data.error || 'Update failed');
     }
 }
 
@@ -409,7 +467,7 @@ async function loadRegisteredCoursesList() {
                             <td>${reg.slot?.faculty_name || 'TBA'}</td>
                             <td>${reg.slot?.course?.c || 0}</td>
                             <td>
-                                <button class="edit-btn" onclick="openEditRegistrationModal('${reg.slot?.course?.id}', '${reg.id}')" title="Edit Slot/Faculty">
+                                <button class="edit-btn" onclick="openEditRegistrationModal('${reg.slot?.course?.id}', '${reg.id}', '${reg.slot?.id}')" title="Edit Slot/Faculty">
                                     <i class="fas fa-edit"></i>
                                 </button>
                                 <button class="delete-btn" onclick="deleteRegistration('${reg.id}')" title="Remove">
@@ -432,9 +490,11 @@ async function loadRegisteredCoursesList() {
 
 // Global variable to track if we are editing a registration
 let currentEditingRegistrationId = null;
+let currentEditingSlotId = null;
 
-function openEditRegistrationModal(courseId, registrationId) {
+function openEditRegistrationModal(courseId, registrationId, currentSlotId) {
     currentEditingRegistrationId = registrationId;
+    currentEditingSlotId = currentSlotId;
 
     // Change modal title temporarily (optional UI tweak)
     // For now re-use existing modal logic
@@ -447,6 +507,7 @@ function openEditRegistrationModal(courseId, registrationId) {
 function closeCourseModal() {
     document.getElementById('courseModal').classList.remove('active');
     currentEditingRegistrationId = null; // Reset edit mode on close
+    currentEditingSlotId = null;
 }
 
 function viewRegisteredCourses() {
