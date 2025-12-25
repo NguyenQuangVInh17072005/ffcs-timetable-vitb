@@ -54,15 +54,7 @@
             <div id="generateStep2" class="generate-step-content">
                 <h3><i class="fas fa-sliders-h"></i> Set Generation Preferences</h3>
 
-                <!-- Generation Mode Tabs -->
-                <div class="pref-tabs">
-                    <div class="pref-tab active" data-tab="custom" onclick="switchGenerateTab('custom')">
-                        <i class="fas fa-sliders-h"></i> Custom
-                    </div>
-                    <div class="pref-tab" data-tab="random" onclick="switchGenerateTab('random')">
-                        <i class="fas fa-dice"></i> Random
-                    </div>
-                </div>
+                <!-- No tabs needed anymore - just show preferences -->
 
                 <!-- 1. Custom Mode Content (Time + Teacher) -->
                 <div id="prefTabContent-custom" class="pref-tab-content active">
@@ -123,16 +115,7 @@
                     </div>
                 </div>
 
-                <!-- 3. Random Mode Content -->
-                <div id="prefTabContent-random" class="pref-tab-content">
-                    <div class="random-mode-info">
-                        <i class="fas fa-random"></i>
-                        <h4>Surprise Me!</h4>
-                        <p>We'll generate completely diverse timetables for you to explore.</p>
-                        <p>Perfect if you want to see all possibilities without constraints.</p>
-                    </div>
-                    <!-- Removed Time Constraints Options from Random Mode -->
-                </div>
+
             </div>
 
             <!-- Step 3: Results -->
@@ -140,26 +123,21 @@
                 <h3>Generated Timetables</h3>
                 <div id="generationStatus" class="generation-status"></div>
 
-                <!-- Two column layout: suggestions + preview -->
-                <div class="results-layout">
-                    <div class="suggestions-column">
-                        <div id="suggestionsList" class="suggestions-list">
-                            <!-- Suggestions rendered here -->
-                        </div>
-                        <div id="loadMoreContainer" class="load-more-container" style="display: none;">
-                            <button type="button" class="btn btn-secondary btn-sm" onclick="loadMoreSuggestions()">
-                                <i class="fas fa-plus"></i> Load More
-                            </button>
-                        </div>
-                    </div>
-
-                    <div class="preview-column">
+                <!-- Results layout: Preview on top, cards below with horizontal scroll -->
+                <div class="results-layout-vertical">
+                    <div class="preview-section">
                         <div id="miniTimetablePreview" class="mini-timetable-container">
                             <div class="preview-placeholder">
                                 <i class="fas fa-table"></i>
                                 <p>Click a timetable to preview</p>
                                 <small>Use ← → to navigate, Enter to apply</small>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="suggestions-scroll-section">
+                        <div id="suggestionsList" class="suggestions-list-horizontal">
+                            <!-- Suggestions rendered here -->
                         </div>
                     </div>
                 </div>
@@ -496,21 +474,69 @@
         color: #e74c3c;
     }
 
-    /* Results Layout - Two Column */
-    .results-layout {
-        display: grid;
-        grid-template-columns: 280px 1fr;
-        gap: 20px;
+    /* Results Layout - Vertical: Preview on top, cards below */
+    .results-layout-vertical {
+        display: flex;
+        flex-direction: column;
+        gap: 15px;
         margin-top: 15px;
     }
 
-    .suggestions-column {
-        max-height: 400px;
-        overflow-y: auto;
+    .preview-section {
+        min-height: 300px;
     }
 
-    .preview-column {
-        min-height: 350px;
+    .suggestions-scroll-section {
+        overflow-x: auto;
+        padding-bottom: 10px;
+    }
+
+    .suggestions-list-horizontal {
+        display: flex;
+        gap: 15px;
+        padding: 5px;
+        min-height: 150px;
+    }
+
+    .suggestion-card {
+        min-width: 280px;
+        max-width: 280px;
+        flex-shrink: 0;
+        border: 2px solid var(--border-color, #e0e0e0);
+        border-radius: 12px;
+        padding: 12px;
+        cursor: pointer;
+        transition: all 0.2s;
+        background: white;
+    }
+
+    .suggestion-card:hover {
+        border-color: var(--primary-color, #3498db);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    }
+
+    .suggestion-card.active-preview {
+        border-color: var(--success-color, #27ae60);
+        background: #f0fff4;
+    }
+
+    .suggestion-slot-line {
+        font-size: 12px;
+        padding: 3px 0;
+        border-bottom: 1px solid #eee;
+    }
+
+    .suggestion-slot-line:last-child {
+        border-bottom: none;
+    }
+
+    .suggestion-pref-count {
+        font-size: 11px;
+        color: #27ae60;
+        font-weight: bold;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid #eee;
     }
 
     .mini-timetable-container {

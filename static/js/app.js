@@ -408,6 +408,9 @@ async function deleteRegistration(regId) {
 async function loadRegisteredCoursesList() {
     const listDiv = document.getElementById('registeredCoursesList');
 
+    // Skip if element doesn't exist (e.g., on generate page)
+    if (!listDiv) return;
+
     try {
         const response = await fetch('/api/registration/');
         const data = await response.json();
@@ -446,7 +449,7 @@ async function loadRegisteredCoursesList() {
                     Select All
                 </label>
                 <button type="button" class="btn btn-danger btn-sm" id="bulkDeleteBtn" onclick="bulkDeleteRegistrations()" disabled>
-                    <i class="fas fa-trash"></i> Remove Selected (<span id="selectedRegCount">0</span>)
+                    <i class="fas fa-trash"></i>
                 </button>
             </div>
             <table class="registered-courses-table">
@@ -1101,20 +1104,12 @@ async function downloadTimetablePDF() {
 // ==================== Auto Generate Timetable ====================
 
 function switchGenerateTab(tabName) {
-    generateActiveTab = tabName;
+    // Tabs removed - no longer needed
+    // Just ensure preferences tab is always active
+    generateActiveTab = 'custom';
 
-    // Update tab styles
-    document.querySelectorAll('.pref-tab').forEach(t => t.classList.remove('active'));
-    document.querySelector(`.pref-tab[data-tab="${tabName}"]`).classList.add('active');
-
-    // Show content
-    document.querySelectorAll('.pref-tab-content').forEach(c => c.classList.remove('active'));
-    document.getElementById(`prefTabContent-${tabName}`).classList.add('active');
-
-    // Special handling
-    if (tabName === 'custom') {
-        populateTeacherPreferences();
-    }
+    // Populate teacher preferences when modal opens
+    populateTeacherPreferences();
 }
 
 async function populateTeacherPreferences() {
@@ -1255,11 +1250,8 @@ function nextGenerateStep() {
         generateCurrentStep = 2;
         updateGenerateStepUI();
 
-        // If Custom tab is active, we need to populate/refresh the teacher preferences 
-        // because they depend on the courses selected in Step 1.
-        if (generateActiveTab === 'custom') {
-            populateTeacherPreferences();
-        }
+        // Populate teacher preferences for the selected courses
+        populateTeacherPreferences();
     }
 }
 
@@ -1361,47 +1353,32 @@ async function generateTimetable() {
         course_faculty_preferences: {}
     };
 
-    // If Random tab is active, we ignore specific prefs (except maybe avoids? User said "very random"...)
-    // Actually, user said "for random generate 100 very random".
-    if (generateActiveTab === 'random') {
-        // Keep defaults (none/empty), maybe clear avoids too?
-        // "generate 100 very random timetables" usually implies no constraints.
-        // But if user explicitly checked 'Avoid' in the other tab, should we respect it?
-        // UI hides them in Random tab (removed in step 953). So effectively unchecked defaults?
-        // Wait, checkboxes are in Time tab only now.
-        // Let's reset avoids for Random mode to be purely random.
-        generatePreferences.avoid_early_morning = false;
-        generatePreferences.avoid_late_evening = false;
-        generatePreferences.time_mode = 'none';
+    // Collect preferences (Random tab removed - always collect from single preferences tab)
 
-    } else {
-        // For Time OR Teacher tab, we collect BOTH to allow "Comprehensive Scoring".
+    // 1. Collect Time Mode
+    const modeEls = document.getElementsByName('timeMode');
+    let selectedMode = 'none';
+    modeEls.forEach(el => { if (el.checked) selectedMode = el.value; });
+    generatePreferences.time_mode = selectedMode;
 
-        // 1. Collect Time Mode
-        const modeEls = document.getElementsByName('timeMode');
-        let selectedMode = 'none';
-        modeEls.forEach(el => { if (el.checked) selectedMode = el.value; });
-        generatePreferences.time_mode = selectedMode;
+    // 2. Collect Teacher Ranks
+    const prefs = {};
+    document.querySelectorAll('.teacher-pref-item').forEach(item => {
+        const courseId = item.dataset.courseId;
+        const rank1 = item.querySelector('.rank-1').value;
+        const rank2 = item.querySelector('.rank-2').value;
+        const rank3 = item.querySelector('.rank-3').value;
 
-        // 2. Collect Teacher Ranks
-        const prefs = {};
-        document.querySelectorAll('.teacher-pref-item').forEach(item => {
-            const courseId = item.dataset.courseId;
-            const rank1 = item.querySelector('.rank-1').value;
-            const rank2 = item.querySelector('.rank-2').value;
-            const rank3 = item.querySelector('.rank-3').value;
+        const list = [];
+        if (rank1) list.push(rank1);
+        if (rank2 && !list.includes(rank2)) list.push(rank2);
+        if (rank3 && !list.includes(rank3)) list.push(rank3);
 
-            const list = [];
-            if (rank1) list.push(rank1);
-            if (rank2 && !list.includes(rank2)) list.push(rank2);
-            if (rank3 && !list.includes(rank3)) list.push(rank3);
-
-            if (list.length > 0) {
-                prefs[courseId] = list; // { course_id: ['FacA', 'FacB'] }
-            }
-        });
-        generatePreferences.course_faculty_preferences = prefs;
-    }
+        if (list.length > 0) {
+            prefs[courseId] = list; // { course_id: ['FacA', 'FacB'] }
+        }
+    });
+    generatePreferences.course_faculty_preferences = prefs;
 
     generateCurrentStep = 3;
     generateCurrentOffset = 0;
@@ -1411,7 +1388,6 @@ async function generateTimetable() {
     const statusDiv = document.getElementById('generationStatus');
     statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Generating timetables...';
     document.getElementById('suggestionsList').innerHTML = '';
-    document.getElementById('loadMoreContainer').style.display = 'none';
 
     console.log('Sending preferences:', generatePreferences);  // DEBUG
 
@@ -1563,98 +1539,90 @@ async function loadMoreSuggestions() {
 }
 
 function renderSuggestions() {
-    const listDiv = document.getElementById('suggestionsList');
+    if (generateSuggestions.length === 0) {
+        document.getElementById('suggestionsList').innerHTML = '<p class="loading-text">No timetables found.</p>';
+        document.getElementById('cardCounter').innerHTML = '';
+        return;
+    }
 
-    listDiv.innerHTML = generateSuggestions.map((suggestion, index) => `
-        <div class="suggestion-card" onclick="previewSuggestion(${index})">
+    // Start with first card
+    currentPreviewIndex = 0;
+    renderCurrentCard();
+}
+
+function renderCurrentCard() {
+    const listDiv = document.getElementById('suggestionsList');
+    const counterDiv = document.getElementById('cardCounter');
+
+    if (currentPreviewIndex < 0 || currentPreviewIndex >= generateSuggestions.length) {
+        return;
+    }
+
+    const index = currentPreviewIndex;
+    const suggestion = generateSuggestions[index];
+
+    // Color palette matching main.py
+    const COURSE_COLORS = [
+        '#90EE90', '#87CEEB', '#FFB6C1', '#DDA0DD', '#F0E68C',
+        '#FF7F50', '#00CED1', '#FFE4B5', '#E6E6FA', '#FFDAB9',
+        '#DA70D6', '#FFA07A'
+    ];
+
+    const courseColors = {};
+    let colorIndex = 0;
+
+    // Assign colors to unique courses in this suggestion
+    suggestion.slots.forEach(slot => {
+        if (!courseColors[slot.course_code]) {
+            courseColors[slot.course_code] = COURSE_COLORS[colorIndex % COURSE_COLORS.length];
+            colorIndex++;
+        }
+    });
+
+    // Build slot lines: color box + course_code: teacher(slot)
+    const slotLines = suggestion.slots.map(s => {
+        const teacherName = s.faculty_name || 'TBA';
+        const color = courseColors[s.course_code] || '#eee';
+        return `<div class="suggestion-slot-line" style="display: flex; align-items: center;">
+            <span style="display: inline-block; width: 12px; height: 12px; background-color: ${color}; border: 1px solid #999; margin-right: 8px; flex-shrink: 0;"></span>
+            <span>${s.course_code}: ${teacherName} (${s.slot_code})</span>
+        </div>`;
+    }).join('');
+
+    // Get preferred teacher count from details
+    const prefCount = suggestion.details?.teacher_match_count ?? suggestion.details?.preferred_faculty_matches ?? 0;
+
+    listDiv.innerHTML = `
+        <div class="suggestion-card">
             <div class="suggestion-header">
                 <span class="suggestion-rank">#${index + 1}</span>
-                <span class="suggestion-score">Score: ${suggestion.score}</span>
+                <span class="suggestion-score">${suggestion.total_credits} cr</span>
             </div>
-            <div class="suggestion-slots">
-                ${suggestion.slots.map(s => `
-                    <span class="suggestion-slot-tag">
-                        ${s.course_code}: ${s.slot_code}
-                    </span>
-                `).join('')}
+            <div class="suggestion-slots-list">
+                ${slotLines}
             </div>
-            <div class="suggestion-details">
-                <strong>${suggestion.total_credits} credits</strong> | 
-                ${suggestion.details.preferred_faculty_matches || 0} preferred faculty | 
-                ${suggestion.details.saturday_classes || 0} Saturday classes
+
+            <div class="suggestion-pref-count">
+                <i class="fas fa-star"></i> ${prefCount} preferred teachers
             </div>
             <div class="suggestion-actions">
-                <button class="btn btn-primary btn-sm" onclick="event.stopPropagation(); generateSimilar(${index})" title="Find variations of this timetable">
-                    <i class="fas fa-copy"></i> More Like This
-                </button>
-                <button class="btn btn-success btn-sm" onclick="event.stopPropagation(); applySuggestion(${index})">
-                    <i class="fas fa-check"></i> Apply
+                <button class="btn btn-success" onclick="applySuggestion(${index})">
+                    <i class="fas fa-check"></i> Apply This Timetable
                 </button>
             </div>
         </div>
-    `).join('');
-}
+    `;
 
-async function generateSimilar(index) {
-    const suggestion = generateSuggestions[index];
-    if (!suggestion) return;
-
-    const statusDiv = document.getElementById('generationStatus');
-    statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Finding similar timetables...';
-
-    const referenceSlotIds = suggestion.slots.map(s => s.slot_id);
-
-    try {
-        const response = await fetch('/api/generate/similar', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                course_ids: generateSelectedCourseIds,
-                reference_slot_ids: referenceSlotIds,
-                preferences: generatePreferences
-            })
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            statusDiv.innerHTML = `<i class="fas fa-exclamation-circle"></i> Error: ${data.error}`;
-            return;
-        }
-
-        if (data.suggestions.length === 0) {
-            statusDiv.innerHTML = '<i class="fas fa-info-circle"></i> No similar variations found. This timetable might be unique!';
-            return;
-        }
-
-        // Add new suggestions (avoiding duplicates)
-        const existingIds = new Set(generateSuggestions.map(s =>
-            s.slots.map(sl => sl.slot_id).sort().join(',')
-        ));
-
-        let addedCount = 0;
-        data.suggestions.forEach(newSugg => {
-            const newId = newSugg.slots.map(sl => sl.slot_id).sort().join(',');
-            if (!existingIds.has(newId)) {
-                generateSuggestions.push(newSugg);
-                existingIds.add(newId);
-                addedCount++;
-            }
-        });
-
-        statusDiv.innerHTML = `<i class="fas fa-check-circle"></i> Found ${addedCount} similar variations! Total: ${generateSuggestions.length} options`;
-        renderSuggestions();
-
-        // Preview the first new one
-        if (addedCount > 0) {
-            previewSuggestion(generateSuggestions.length - addedCount);
-        }
-
-    } catch (error) {
-        console.error('Similar generation error:', error);
-        statusDiv.innerHTML = '<i class="fas fa-exclamation-circle"></i> Error finding similar timetables.';
+    // Update counter
+    if (counterDiv) {
+        counterDiv.innerHTML = `<strong>${index + 1}</strong> of <strong>${generateSuggestions.length}</strong> timetables &nbsp;|&nbsp; Use ← → arrow keys to navigate`;
     }
+
+    // Update timetable preview
+    renderMiniTimetable(suggestion, courseColors);
 }
+
+
 
 function previewSuggestion(index) {
     const suggestion = generateSuggestions[index];
@@ -1681,20 +1649,21 @@ function previewSuggestion(index) {
     }
 }
 
-function renderMiniTimetable(suggestion) {
+function renderMiniTimetable(suggestion, courseColors = {}) {
     const container = document.getElementById('miniTimetablePreview');
     if (!container) return;
 
-    // Define the grid structure
+    // Define the grid structure with lunch
     const days = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
     const periods = [
-        { num: 1, time: '8:30-10:00' },
-        { num: 2, time: '10:05-11:35' },
-        { num: 3, time: '11:40-13:10' },
-        { num: 4, time: '13:15-14:45' },
-        { num: 5, time: '14:50-16:20' },
-        { num: 6, time: '16:25-17:55' },
-        { num: 7, time: '18:00-19:30' }
+        { num: 1, time: '8:30-10:00', label: 'P1' },
+        { num: 2, time: '10:05-11:35', label: 'P2' },
+        { num: 3, time: '11:40-13:10', label: 'P3' },
+        { num: 'lunch', time: 'LUNCH', label: '🍽️' },
+        { num: 4, time: '13:15-14:45', label: 'P4' },
+        { num: 5, time: '14:50-16:20', label: 'P5' },
+        { num: 6, time: '16:25-17:55', label: 'P6' },
+        { num: 7, time: '18:00-19:30', label: 'P7' }
     ];
 
     // Map slot codes to their day/period
@@ -1727,35 +1696,53 @@ function renderMiniTimetable(suggestion) {
             if (timing) {
                 grid[timing.day][timing.period] = {
                     code: slotInfo.course_code,
-                    venue: slotInfo.venue || ''
+                    venue: slotInfo.venue || '',
+                    faculty: slotInfo.faculty_name || ''
                 };
             }
         });
     });
 
+    // Calculate stats
+    const prefCount = suggestion.details?.teacher_match_count ?? suggestion.details?.preferred_faculty_matches ?? 0;
+    const satClasses = suggestion.details?.saturday_classes ?? 0;
+
+    // Color palette logic moved to renderCurrentCard
+
     // Generate HTML - Days as rows, Times as columns
-    let html = '<table class="mini-timetable"><thead><tr><th class="day-header">Day</th>';
-    periods.forEach(p => html += `<th class="time-col">${p.time}</th>`);
+    let html = '<div class="preview-timetable-wrapper">';
+    html += '<table class="mini-timetable"><thead><tr><th class="day-header">Day</th>';
+    periods.forEach(p => {
+        if (p.num === 'lunch') {
+            html += '<th class="time-col lunch-col">Lunch</th>';
+        } else {
+            html += `<th class="time-col"><div>${p.label}</div><small>${p.time}</small></th>`;
+        }
+    });
     html += '</tr></thead><tbody>';
 
     days.forEach(d => {
         html += `<tr><td class="day-header">${d}</td>`;
         periods.forEach(p => {
-            const cell = grid[d][p.num];
-            if (cell) {
-                html += `<td class="slot-filled" title="${cell.code} - ${cell.venue}">${cell.code}</td>`;
+            if (p.num === 'lunch') {
+                html += '<td class="lunch-cell"><span>LUNCH</span></td>';
             } else {
-                html += '<td class="slot-empty"></td>';
+                const cell = grid[d][p.num];
+                if (cell) {
+                    const bgColor = courseColors[cell.code] || '#90EE90';
+                    html += `<td class="slot-filled" style="background-color: ${bgColor};" title="${cell.code} - ${cell.faculty || 'TBA'} @ ${cell.venue || 'TBA'}">
+                        <div class="slot-code">${cell.code}</div>
+                        <div class="slot-venue">${cell.venue || ''}</div>
+                    </td>`;
+                } else {
+                    html += '<td class="slot-empty"></td>';
+                }
             }
         });
         html += '</tr>';
     });
 
-    html += '</tbody></table>';
-    html += `<div class="preview-info">
-        <span class="credits-badge">${suggestion.total_credits} Credits</span>
-        <span style="margin-left: 10px;">Score: ${suggestion.score}</span>
-    </div>`;
+    html += '</tbody></table></div>';
 
     container.innerHTML = html;
 }
@@ -1780,20 +1767,22 @@ function navigatePreview(direction) {
     if (newIndex < 0) newIndex = generateSuggestions.length - 1;
     if (newIndex >= generateSuggestions.length) newIndex = 0;
 
-    previewSuggestion(newIndex);
-
-    // Scroll the active card into view
-    const activeCard = document.querySelector('.suggestion-card.active-preview');
-    if (activeCard) {
-        activeCard.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-    }
+    currentPreviewIndex = newIndex;
+    renderCurrentCard();
 }
 
 // Arrow key and Enter navigation for previews
 document.addEventListener('keydown', function (e) {
-    // Only handle keys when generate modal is open and we're on step 3 (results)
+    // Only handle keys when we're on step 3 (results) - works for both modal and page
+    const onGeneratePage = document.querySelector('.generate-page-main') !== null;
     const modal = document.getElementById('generateModal');
-    if (!modal || !modal.classList.contains('active') || generateCurrentStep !== 3) {
+    const modalOpen = modal && modal.classList.contains('active');
+
+    // Must be on generate page OR modal open, and on step 3
+    if (!onGeneratePage && !modalOpen) {
+        return;
+    }
+    if (generateCurrentStep !== 3) {
         return;
     }
 
@@ -1832,8 +1821,8 @@ async function applySuggestion(index) {
 
         if (response.ok) {
             alert(`Success! Registered ${data.registration_count} courses.`);
-            closeGenerateModal();
-            location.reload();
+            // Redirect to main page (works for both modal and page)
+            window.location.href = '/';
         } else {
             alert('Error: ' + data.error);
         }

@@ -1,10 +1,25 @@
 """Routes for auto-generating timetable suggestions."""
 
-from flask import Blueprint, request, jsonify, session
-from models import db, Course, Slot, Faculty, Registration
+from flask import Blueprint, request, jsonify, session, render_template
+from models import db, Course, Slot, Faculty, Registration, User
 from utils.timetable_generator import TimetableGenerator, GenerationPreferences
+import uuid
 
 generate_bp = Blueprint('generate', __name__)
+
+
+@generate_bp.route('/page')
+def generate_page():
+    """Dedicated timetable generation page."""
+    current_user = None
+    
+    if 'user_id' in session:
+        current_user = User.query.get(session['user_id'])
+    else:
+        if 'guest_id' not in session:
+            session['guest_id'] = str(uuid.uuid4())
+    
+    return render_template('generate.html', current_user=current_user)
 
 
 def get_user_scope():
@@ -169,12 +184,13 @@ def suggest_timetable():
     {
         "course_ids": [1, 2, 3],
         "preferences": {
-            "avoid_saturday": true,
-            "prefer_morning": false,
-            "prefer_afternoon": false,
+            "time_mode": "morning",
+            "avoid_early_morning": false,
+            "avoid_late_evening": false,
             "preferred_faculties": ["FACULTY NAME"],
             "avoided_faculties": ["ANOTHER FACULTY"],
-            "exclude_slots": ["A11", "B12"]
+            "exclude_slots": ["A11", "B12"],
+            "course_faculty_preferences": {"course_id": ["Fac1", "Fac2"]}
         }
     }
     """
@@ -257,92 +273,29 @@ def suggest_timetable():
         
     generator = TimetableGenerator(courses, preferences)
     
-    # Use new Rank-Based Generation Strategy
-    # Generates large pool (Target: 20k valid) -> filters -> ranks -> top N
-    solutions = generator.generate_ranked_pool(target_size=limit, pool_attempts=200000)
+    # Unified Generation Strategy:
+    # Handles all 4 scenarios internally:
+    # 1. NO FILTERS: Random 100
+    # 2. TIME ONLY: 20k random → rank by time → top 100
+    # 3. TEACHER ONLY: 20k random → tier by teacher count → rank by priority → top 100
+    # 4. TIME + TEACHER: 20k random → tier by teacher count → rank by time → top 100
     
-    # Debug info
-    relaxed_constraints = False # Concept no longer applies directly as we rank everything
+    solutions = generator.generate_unified(target_size=limit)
+    
+    # Extract method from first solution's details
+    generation_method = solutions[0].details.get('method', 'unknown') if solutions else 'none'
+    pool_size = solutions[0].details.get('pool_size', 0) if solutions else 0
     
     return jsonify({
         'success': True,
         'suggestions': [s.to_dict() for s in solutions],
         'count': len(solutions),
         'has_more': False,
-        'relaxed_constraints': False # Deprecated but kept for frontend compat
+        'generation_method': generation_method,
+        'total_combinations': pool_size,
+        'relaxed_constraints': False  # Deprecated but kept for frontend compat
     })
 
-
-@generate_bp.route('/similar', methods=['POST'])
-def generate_similar():
-    """
-    Generate timetables similar to a reference (selected by user).
-    
-    Request body:
-    {
-        "course_ids": ["1", "2", "3"],
-        "reference_slot_ids": ["101", "102", "103"],
-        "preferences": {...}
-    }
-    """
-    user_id, guest_id = get_user_scope()
-    
-    if not user_id and not guest_id:
-        return jsonify({'error': 'No active session'}), 401
-    
-    data = request.get_json() or {}
-    course_ids = data.get('course_ids', [])
-    reference_slot_ids = data.get('reference_slot_ids', [])
-    pref_data = data.get('preferences', {})
-    
-    if not course_ids or not reference_slot_ids:
-        return jsonify({'error': 'Missing course_ids or reference_slot_ids'}), 400
-    
-    # Convert string IDs to integers
-    try:
-        course_ids = [int(cid) for cid in course_ids]
-        reference_slot_ids = [int(sid) for sid in reference_slot_ids]
-    except (ValueError, TypeError):
-        return jsonify({'error': 'Invalid ID format'}), 400
-    
-    # Get courses (scoped to user)
-    if user_id:
-        courses = Course.query.filter(
-            Course.id.in_(course_ids),
-            Course.user_id == user_id
-        ).all()
-    else:
-        courses = Course.query.filter(
-            Course.id.in_(course_ids),
-            Course.guest_id == guest_id
-        ).all()
-    
-    if not courses:
-        return jsonify({'error': 'No valid courses found'}), 404
-    
-    # Build preferences
-    preferences = GenerationPreferences(
-        avoid_early_morning=pref_data.get('avoid_early_morning', False),
-        avoid_late_evening=pref_data.get('avoid_late_evening', False),
-        prefer_morning=pref_data.get('prefer_morning', False),
-        prefer_afternoon=pref_data.get('prefer_afternoon', False),
-        preferred_faculties=pref_data.get('preferred_faculties', []),
-        avoided_faculties=pref_data.get('avoided_faculties', []),
-        exclude_slots=pref_data.get('exclude_slots', []),
-        time_mode=pref_data.get('time_mode', 'none'),
-        course_faculty_preferences=pref_data.get('course_faculty_preferences', {})
-    )
-    
-    # Generate similar solutions
-    generator = TimetableGenerator(courses, preferences)
-    solutions = generator.generate_similar(reference_slot_ids, limit=5)
-    
-    return jsonify({
-        'success': True,
-        'suggestions': [s.to_dict() for s in solutions],
-        'count': len(solutions),
-        'mode': 'similar'
-    })
 
 
 @generate_bp.route('/more', methods=['POST'])
@@ -394,12 +347,15 @@ def generate_more():
     
     # Build preferences
     preferences = GenerationPreferences(
-        avoid_saturday=pref_data.get('avoid_saturday', False),
+        avoid_early_morning=pref_data.get('avoid_early_morning', False),
+        avoid_late_evening=pref_data.get('avoid_late_evening', False),
         prefer_morning=pref_data.get('prefer_morning', False),
         prefer_afternoon=pref_data.get('prefer_afternoon', False),
         preferred_faculties=pref_data.get('preferred_faculties', []),
         avoided_faculties=pref_data.get('avoided_faculties', []),
-        exclude_slots=pref_data.get('exclude_slots', [])
+        exclude_slots=pref_data.get('exclude_slots', []),
+        time_mode=pref_data.get('time_mode', 'none'),
+        course_faculty_preferences=pref_data.get('course_faculty_preferences', {})
     )
     
     # Generate more solutions
@@ -442,11 +398,23 @@ def apply_suggestion():
     except (ValueError, TypeError):
         return jsonify({'error': 'Invalid slot ID format'}), 400
     
-    # Get slots
+    # Get slots with their courses for ownership verification
     slots = Slot.query.filter(Slot.id.in_(slot_ids)).all()
     
     if len(slots) != len(slot_ids):
         return jsonify({'error': 'Some slots not found'}), 404
+    
+    # Security: Verify all slots belong to courses owned by this user/guest
+    for slot in slots:
+        if slot.course:
+            course_owner_match = False
+            if user_id and slot.course.user_id == user_id:
+                course_owner_match = True
+            elif guest_id and slot.course.guest_id == guest_id:
+                course_owner_match = True
+            
+            if not course_owner_match:
+                return jsonify({'error': 'Unauthorized: slot does not belong to your courses'}), 403
     
     try:
         # Clear existing registrations for this user (optional - could make this configurable)

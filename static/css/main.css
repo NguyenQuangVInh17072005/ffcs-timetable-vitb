@@ -344,6 +344,25 @@ body {
     color: var(--primary-color);
 }
 
+.timetable-header .header-actions {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.timetable-header .header-btn {
+    padding: var(--spacing-sm) var(--spacing-md);
+    font-size: 0.9rem;
+    text-decoration: none;
+    width: 160px;
+    height: 40px;
+    justify-content: center;
+}
+
+a.btn {
+    text-decoration: none;
+}
+
 /* Cell Selection Bar */
 .cell-selection-bar {
     display: flex;
@@ -518,11 +537,7 @@ body {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: var(--spacing-sm) var(--spacing-md);
-    background-color: #f8f9fa;
-    border-radius: var(--radius-sm);
     margin-bottom: var(--spacing-md);
-    border: 1px solid var(--border-color);
 }
 
 .select-all-reg-label {
@@ -531,6 +546,7 @@ body {
     gap: 8px;
     cursor: pointer;
     font-weight: 500;
+    margin-right: 15px;
 }
 
 .reg-checkbox {
@@ -595,6 +611,15 @@ body {
     background-color: #c53030;
 }
 
+.btn-success {
+    background-color: #27ae60;
+    color: white;
+}
+
+.btn-success:hover {
+    background-color: #1e8449;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .app-main {
@@ -639,7 +664,7 @@ body {
 .btn-success {
     background-color: var(--success-color);
     color: white;
-    width: 100%;
+   
 }
 
 .btn-success:hover:not(:disabled) {

@@ -73,7 +73,13 @@ MUTUAL_EXCLUSION_GROUPS = [
 class TimetableGenerator:
     """
     Constraint-based timetable generator.
-    Uses backtracking with pruning to find valid combinations.
+    Uses backtracking with pruning, constraint propagation (AC-3), and beam search.
+    
+    Performance optimizations:
+    - Pre-computed conflict matrix for O(1) clash detection
+    - Cached slot timings to avoid repeated parsing
+    - Arc consistency to prune impossible slots early
+    - Beam search for efficient high-quality solution finding
     """
     
     def __init__(self, courses: List[Course], preferences: GenerationPreferences = None):
@@ -87,7 +93,84 @@ class TimetableGenerator:
         self.courses = courses
         self.preferences = preferences or GenerationPreferences()
         self.slot_map: Dict[int, List[Slot]] = {}  # course_id -> available slots
+        
+        # Performance caches
+        self._slot_timings_cache: Dict[int, Set[Tuple[str, int]]] = {}  # slot_id -> {(day, period), ...}
+        self._conflict_matrix: Dict[int, Set[int]] = {}  # slot_id -> set of conflicting slot_ids
+        self._slot_scores_cache: Dict[int, float] = {}  # slot_id -> pre-computed score
+        
+        # Build initial slot map
         self._build_slot_map()
+        
+        # Pre-compute optimizations
+        self._build_timing_cache()
+        self._build_conflict_matrix()
+    
+    def _build_timing_cache(self):
+        """Pre-compute timing information for all slots."""
+        for course in self.courses:
+            for slot in self.slot_map.get(course.id, []):
+                if slot.id not in self._slot_timings_cache:
+                    timings = set()
+                    for code in slot.get_individual_slots():
+                        timing = get_slot_timing(code)
+                        if timing:
+                            timings.add((timing['day'], timing['period']))
+                    self._slot_timings_cache[slot.id] = timings
+    
+    def _build_conflict_matrix(self):
+        """Pre-compute which slots conflict with each other for O(1) clash detection."""
+        all_slots = []
+        for course in self.courses:
+            all_slots.extend(self.slot_map.get(course.id, []))
+        
+        # Initialize empty conflict sets
+        for slot in all_slots:
+            self._conflict_matrix[slot.id] = set()
+        
+        # Build conflict relationships
+        for i, slot1 in enumerate(all_slots):
+            timings1 = self._slot_timings_cache.get(slot1.id, set())
+            codes1 = set(slot1.get_individual_slots())
+            
+            for slot2 in all_slots[i+1:]:
+                # Skip same course (we select one slot per course anyway)
+                if slot1.course_id == slot2.course_id:
+                    continue
+                
+                timings2 = self._slot_timings_cache.get(slot2.id, set())
+                codes2 = set(slot2.get_individual_slots())
+                
+                # Check time overlap (O(1) set intersection)
+                if timings1 & timings2:
+                    self._conflict_matrix[slot1.id].add(slot2.id)
+                    self._conflict_matrix[slot2.id].add(slot1.id)
+                    continue
+                
+                # Check mutual exclusion groups
+                for group_a, group_b in MUTUAL_EXCLUSION_GROUPS:
+                    has_1_in_a = not codes1.isdisjoint(group_a)
+                    has_1_in_b = not codes1.isdisjoint(group_b)
+                    has_2_in_a = not codes2.isdisjoint(group_a)
+                    has_2_in_b = not codes2.isdisjoint(group_b)
+                    
+                    if (has_1_in_a and has_2_in_b) or (has_1_in_b and has_2_in_a):
+                        self._conflict_matrix[slot1.id].add(slot2.id)
+                        self._conflict_matrix[slot2.id].add(slot1.id)
+                        break
+
+    def _check_clash_fast(self, slot1_id: int, slot2_id: int) -> bool:
+        """O(1) clash detection using pre-computed conflict matrix."""
+        return slot2_id in self._conflict_matrix.get(slot1_id, set())
+    
+    def _has_time_clash_with_occupied(self, slot: Slot, occupied: Set[Tuple[str, int]]) -> bool:
+        """Check if slot's timings overlap with already occupied time slots."""
+        slot_timings = self._slot_timings_cache.get(slot.id, set())
+        return bool(slot_timings & occupied)
+    
+    def _get_slot_timings(self, slot: Slot) -> Set[Tuple[str, int]]:
+        """Get cached timings for a slot."""
+        return self._slot_timings_cache.get(slot.id, set())
     
     def _build_slot_map(self, randomize_only: bool = False, ignore_preferences: bool = False):
         """
@@ -131,6 +214,749 @@ class TimetableGenerator:
             # (Removed early/late specific checks)
         
         return False
+    
+    def filter_to_preferred_teachers(self) -> None:
+        """
+        Filter slot map to ONLY include slots with preferred teachers.
+        
+        For each course that has teacher preferences, keep only slots
+        where the faculty is in the preference list.
+        This dramatically reduces the search space.
+        """
+        if not self.preferences.course_faculty_preferences:
+            return
+        
+        for course in self.courses:
+            cid_str = str(course.id)
+            preferred_teachers = self.preferences.course_faculty_preferences.get(cid_str, [])
+            
+            if preferred_teachers:
+                # Filter to only slots with preferred teachers
+                current_slots = self.slot_map.get(course.id, [])
+                filtered_slots = [
+                    slot for slot in current_slots
+                    if slot.faculty and slot.faculty.name in preferred_teachers
+                ]
+                
+                # Only apply filter if it leaves some slots
+                if filtered_slots:
+                    self.slot_map[course.id] = filtered_slots
+                # If no slots match, keep all slots (soft constraint)
+
+    def generate_tiered_teacher_pool(self, target_pool: int = 20000, target_size: int = 100) -> List[TimetableSolution]:
+        """
+        Generate timetables in tiers based on how many preferred teachers are matched.
+        
+        Tier order (highest priority first):
+        - Tier N: All N courses have preferred teachers
+        - Tier N-1: N-1 courses have preferred teachers
+        - ...
+        - Tier 0: No preferred teachers (random fallback)
+        
+        Fills each tier before moving to next, until target_pool is reached.
+        Then ranks all by teacher priority score.
+        
+        Args:
+            target_pool: Maximum number of timetables to collect across all tiers
+            target_size: Number of top solutions to return
+            
+        Returns:
+            List of TimetableSolution objects, ranked by score
+        """
+        if not self.courses:
+            return []
+        
+        # Separate slots into preferred vs non-preferred for each course
+        preferred_slots: Dict[int, List[Slot]] = {}
+        non_preferred_slots: Dict[int, List[Slot]] = {}
+        
+        for course in self.courses:
+            cid_str = str(course.id)
+            prefs = self.preferences.course_faculty_preferences.get(cid_str, [])
+            all_slots = self.slot_map.get(course.id, [])
+            
+            if prefs:
+                preferred_slots[course.id] = [s for s in all_slots if s.faculty and s.faculty.name in prefs]
+                non_preferred_slots[course.id] = [s for s in all_slots if not s.faculty or s.faculty.name not in prefs]
+            else:
+                # No preference for this course - all slots are "preferred"
+                preferred_slots[course.id] = all_slots
+                non_preferred_slots[course.id] = []
+        
+        all_solutions: List[List[Slot]] = []
+        seen_signatures: Set[frozenset] = set()
+        num_courses = len(self.courses)
+        
+        # Generate tiers from best (all preferred) to worst (none preferred)
+        for num_preferred in range(num_courses, -1, -1):
+            if len(all_solutions) >= target_pool:
+                break
+            
+            # Generate combinations where exactly num_preferred courses use preferred slots
+            tier_solutions = self._generate_tier(
+                num_preferred, 
+                preferred_slots, 
+                non_preferred_slots,
+                seen_signatures,
+                target_pool - len(all_solutions)
+            )
+            all_solutions.extend(tier_solutions)
+        
+        # Score and rank all solutions
+        scored_solutions = []
+        for slots in all_solutions:
+            score = self._calculate_solution_total_score(slots)
+            total_credits = sum(s.course.c if s.course else 0 for s in slots)
+            
+            # Count how many preferred teachers
+            pref_count = 0
+            for slot in slots:
+                cid_str = str(slot.course_id)
+                prefs = self.preferences.course_faculty_preferences.get(cid_str, [])
+                if slot.faculty and slot.faculty.name in prefs:
+                    pref_count += 1
+            
+            details = self._build_solution_details(slots)
+            details['method'] = 'tiered_teacher_pool'
+            details['preferred_teacher_count'] = pref_count
+            details['total_pool_size'] = len(all_solutions)
+            
+            scored_solutions.append(TimetableSolution(
+                slots=slots,
+                score=score,
+                total_credits=total_credits,
+                details=details
+            ))
+        
+        # Sort by score (highest first)
+        scored_solutions.sort(key=lambda x: x.score, reverse=True)
+        
+        return scored_solutions[:target_size]
+    
+    def _generate_tier(
+        self, 
+        num_preferred: int,
+        preferred_slots: Dict[int, List[Slot]],
+        non_preferred_slots: Dict[int, List[Slot]],
+        seen_signatures: Set[frozenset],
+        max_solutions: int
+    ) -> List[List[Slot]]:
+        """
+        Generate timetables where exactly num_preferred courses use preferred teachers.
+        Uses backtracking with randomization for diversity.
+        """
+        solutions: List[List[Slot]] = []
+        num_courses = len(self.courses)
+        
+        if num_preferred > num_courses:
+            return solutions
+        
+        # Try multiple random orderings for diversity
+        max_attempts = max_solutions * 50
+        attempts = 0
+        
+        while len(solutions) < max_solutions and attempts < max_attempts:
+            attempts += 1
+            
+            # Randomly choose which courses use preferred slots
+            course_indices = list(range(num_courses))
+            random.shuffle(course_indices)
+            use_preferred = set(course_indices[:num_preferred])
+            
+            # Try to build a valid timetable with this configuration
+            result = self._try_build_timetable(use_preferred, preferred_slots, non_preferred_slots)
+            
+            if result:
+                sig = frozenset(s.id for s in result)
+                if sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    solutions.append(result)
+        
+        return solutions
+    
+    def _try_build_timetable(
+        self,
+        use_preferred: Set[int],
+        preferred_slots: Dict[int, List[Slot]],
+        non_preferred_slots: Dict[int, List[Slot]]
+    ) -> Optional[List[Slot]]:
+        """
+        Try to build a valid timetable with the given configuration.
+        Returns None if no valid combination found.
+        """
+        selected: List[Slot] = []
+        occupied: Set[Tuple[str, int]] = set()
+        
+        # Shuffle course order for diversity
+        courses = list(self.courses)
+        random.shuffle(courses)
+        
+        for i, course in enumerate(courses):
+            # Choose slot pool based on whether this course should use preferred
+            course_idx = self.courses.index(course)
+            if course_idx in use_preferred:
+                pool = preferred_slots.get(course.id, [])
+            else:
+                pool = non_preferred_slots.get(course.id, [])
+            
+            # If pool is empty, try the other pool
+            if not pool:
+                if course_idx in use_preferred:
+                    pool = non_preferred_slots.get(course.id, [])
+                else:
+                    pool = preferred_slots.get(course.id, [])
+            
+            if not pool:
+                return None  # No slots available
+            
+            # Shuffle and try to find a valid slot
+            pool_copy = list(pool)
+            random.shuffle(pool_copy)
+            
+            found = False
+            for slot in pool_copy:
+                # Check clash with selected slots
+                has_clash = False
+                for existing in selected:
+                    if self._check_clash(slot, existing):
+                        has_clash = True
+                        break
+                
+                if not has_clash:
+                    # Check time overlap
+                    slot_times = set()
+                    time_clash = False
+                    for code in slot.get_individual_slots():
+                        timing = get_slot_timing(code)
+                        if timing:
+                            key = (timing['day'], timing['period'])
+                            if key in occupied:
+                                time_clash = True
+                                break
+                            slot_times.add(key)
+                    
+                    if not time_clash:
+                        selected.append(slot)
+                        occupied.update(slot_times)
+                        found = True
+                        break
+            
+            if not found:
+                return None  # Couldn't find valid slot for this course
+        
+        return selected if len(selected) == len(self.courses) else None
+
+    def generate_unified(self, target_size: int = 100) -> List[TimetableSolution]:
+        """
+        Unified generation flow handling all 4 scenarios:
+        
+        1. NO FILTERS: Generate random 100 timetables
+        2. TIME ONLY: Generate 20k random → rank by time → return top 100
+        3. TEACHER ONLY: Generate 20k tiered → tier by teacher count → rank by priority → return top 100
+        4. TIME + TEACHER: Generate 20k random → tier by teacher count → rank by time within tier → waterfall top 100
+        
+        Returns:
+            List of TimetableSolution objects
+        """
+        has_teacher_prefs = bool(self.preferences.course_faculty_preferences)
+        # Time prefs include time_mode OR avoid filters
+        has_time_prefs = (
+            self.preferences.time_mode != 'none' or
+            self.preferences.avoid_early_morning or
+            self.preferences.avoid_late_evening
+        )
+        
+        # Generate 20k random pool for all scenarios (except no filters)
+        if not has_teacher_prefs and not has_time_prefs:
+            # SCENARIO 1: NO FILTERS - just generate 100 random
+            return self._generate_random_solutions(target_size)
+        
+        # Generate the pool (20k random timetables)
+        pool = self._generate_random_pool(target_pool=20000)
+        
+        if not pool:
+            return []
+        
+        # Calculate metrics for each timetable
+        scored_pool = []
+        for slots in pool:
+            teacher_match_count = self._count_preferred_teachers(slots)
+            time_score = self._calculate_time_score(slots)
+            teacher_priority_score = self._calculate_teacher_priority_score(slots)
+            total_credits = sum(s.course.c if s.course else 0 for s in slots)
+            
+            scored_pool.append({
+                'slots': slots,
+                'teacher_match_count': teacher_match_count,
+                'time_score': time_score,
+                'teacher_priority_score': teacher_priority_score,
+                'total_credits': total_credits
+            })
+        
+        # Route to appropriate ranking strategy
+        if has_time_prefs and not has_teacher_prefs:
+            # SCENARIO 2: TIME ONLY - rank by time score
+            return self._rank_by_time(scored_pool, target_size)
+        
+        elif has_teacher_prefs and not has_time_prefs:
+            # SCENARIO 3: TEACHER ONLY - tier by count, rank by priority within tier
+            return self._rank_tiered_by_teacher_priority(scored_pool, target_size)
+        
+        else:
+            # SCENARIO 4: BOTH - tier by teacher count, rank by time within tier
+            return self._rank_tiered_by_time(scored_pool, target_size)
+    
+    def _generate_random_solutions(self, target_size: int) -> List[TimetableSolution]:
+        """Generate random timetables without any ranking (no filters scenario)."""
+        self._build_slot_map(randomize_only=True, ignore_preferences=True)
+        
+        solutions = []
+        seen = set()
+        max_attempts = target_size * 100
+        attempts = 0
+        
+        while len(solutions) < target_size and attempts < max_attempts:
+            attempts += 1
+            result = self._try_random_timetable()
+            if result:
+                sig = frozenset(s.id for s in result)
+                if sig not in seen:
+                    seen.add(sig)
+                    total_credits = sum(s.course.c if s.course else 0 for s in result)
+                    solutions.append(TimetableSolution(
+                        slots=result,
+                        score=0,  # No scoring for random
+                        total_credits=total_credits,
+                        details={'method': 'random', 'pool_size': len(solutions)}
+                    ))
+        
+        return solutions
+    
+    def _generate_random_pool(self, target_pool: int = 20000) -> List[List[Slot]]:
+        """Generate a pool of random valid timetables with early termination."""
+        self._build_slot_map(randomize_only=True, ignore_preferences=True)
+        self._build_timing_cache()
+        self._build_conflict_matrix()
+        
+        pool = []
+        seen = set()
+        max_attempts = target_pool * 10
+        attempts = 0
+        
+        # Early termination: stop if no new solutions found in N attempts
+        no_progress_count = 0
+        no_progress_limit = 1000  # Stop after 1000 consecutive failures
+        
+        while len(pool) < target_pool and attempts < max_attempts:
+            attempts += 1
+            result = self._try_random_timetable()
+            
+            if result:
+                sig = frozenset(s.id for s in result)
+                if sig not in seen:
+                    seen.add(sig)
+                    pool.append(result)
+                    no_progress_count = 0  # Reset on success
+                else:
+                    no_progress_count += 1
+            else:
+                no_progress_count += 1
+            
+            # Early termination: all combinations likely found
+            if no_progress_count >= no_progress_limit:
+                break
+        
+        return pool
+    
+    def _try_random_timetable(self) -> Optional[List[Slot]]:
+        """Try to build one random valid timetable."""
+        selected = []
+        occupied = set()
+        
+        courses = list(self.courses)
+        random.shuffle(courses)
+        
+        for course in courses:
+            slots = self.slot_map.get(course.id, [])
+            if not slots:
+                return None
+            
+            random.shuffle(slots)
+            found = False
+            
+            for slot in slots[:10]:  # Try up to 10 random slots
+                has_clash = False
+                for existing in selected:
+                    if self._check_clash(slot, existing):
+                        has_clash = True
+                        break
+                
+                if not has_clash:
+                    slot_times = set()
+                    time_clash = False
+                    for code in slot.get_individual_slots():
+                        timing = get_slot_timing(code)
+                        if timing:
+                            key = (timing['day'], timing['period'])
+                            if key in occupied:
+                                time_clash = True
+                                break
+                            slot_times.add(key)
+                    
+                    if not time_clash:
+                        selected.append(slot)
+                        occupied.update(slot_times)
+                        found = True
+                        break
+            
+            if not found:
+                return None
+        
+        return selected if len(selected) == len(self.courses) else None
+    
+    def _count_preferred_teachers(self, slots: List[Slot]) -> int:
+        """Count how many courses have a preferred teacher."""
+        count = 0
+        for slot in slots:
+            cid_str = str(slot.course_id)
+            prefs = self.preferences.course_faculty_preferences.get(cid_str, [])
+            if slot.faculty and slot.faculty.name in prefs:
+                count += 1
+        return count
+    
+    def _calculate_time_score(self, slots: List[Slot]) -> float:
+        """Calculate time preference score for a timetable."""
+        mode = self.preferences.time_mode
+        avoid_early = self.preferences.avoid_early_morning
+        avoid_late = self.preferences.avoid_late_evening
+        
+        total_score = 0.0
+        cell_count = 0
+        
+        for slot in slots:
+            for code in slot.get_individual_slots():
+                timing = get_slot_timing(code)
+                if timing:
+                    period = timing['period']
+                    cell_count += 1
+                    
+                    # Apply avoid penalties first
+                    if avoid_early and period == 1:
+                        total_score += 0  # Strongly penalize 8:30 slots
+                    elif avoid_late and period == 7:
+                        total_score += 0  # Strongly penalize 6:00 PM slots
+                    elif mode == 'morning':
+                        total_score += max(0, 115 - (15 * period))
+                    elif mode == 'afternoon' or mode == 'evening':
+                        total_score += max(0, 10 + (15 * (period - 1)))
+                    elif mode == 'middle':
+                        dist = abs(period - 4)
+                        total_score += max(0, 100 - (30 * dist))
+                    else:
+                        total_score += 50
+        
+        return total_score / cell_count if cell_count > 0 else 0
+    
+    def _calculate_teacher_priority_score(self, slots: List[Slot]) -> float:
+        """Calculate teacher priority score (higher = better priority matches)."""
+        total_score = 0.0
+        
+        for slot in slots:
+            cid_str = str(slot.course_id)
+            prefs = self.preferences.course_faculty_preferences.get(cid_str, [])
+            
+            if slot.faculty and slot.faculty.name in prefs:
+                rank = prefs.index(slot.faculty.name)
+                if rank == 0:
+                    total_score += 1000
+                elif rank == 1:
+                    total_score += 800
+                elif rank == 2:
+                    total_score += 600
+        
+        return total_score
+    
+    def _rank_by_time(self, scored_pool: List[Dict], target_size: int) -> List[TimetableSolution]:
+        """SCENARIO 2: TIME ONLY - rank by time score."""
+        scored_pool.sort(key=lambda x: x['time_score'], reverse=True)
+        
+        results = []
+        for item in scored_pool[:target_size]:
+            details = self._build_solution_details(item['slots'])
+            details['method'] = 'time_ranked'
+            details['time_score'] = round(item['time_score'], 2)
+            details['pool_size'] = len(scored_pool)
+            
+            results.append(TimetableSolution(
+                slots=item['slots'],
+                score=item['time_score'],
+                total_credits=item['total_credits'],
+                details=details
+            ))
+        
+        return results
+    
+    def _rank_tiered_by_teacher_priority(self, scored_pool: List[Dict], target_size: int) -> List[TimetableSolution]:
+        """SCENARIO 3: TEACHER ONLY - tier by count, rank by priority within tier."""
+        num_courses = len(self.courses)
+        results = []
+        
+        # Group by teacher match count (tier)
+        for tier in range(num_courses, -1, -1):
+            tier_items = [x for x in scored_pool if x['teacher_match_count'] == tier]
+            
+            # Sort by teacher priority score within tier
+            tier_items.sort(key=lambda x: x['teacher_priority_score'], reverse=True)
+            
+            for item in tier_items:
+                if len(results) >= target_size:
+                    break
+                
+                details = self._build_solution_details(item['slots'])
+                details['method'] = 'tiered_teacher_priority'
+                details['teacher_match_count'] = item['teacher_match_count']
+                details['teacher_priority_score'] = round(item['teacher_priority_score'], 2)
+                details['tier'] = tier
+                details['pool_size'] = len(scored_pool)
+                
+                results.append(TimetableSolution(
+                    slots=item['slots'],
+                    score=item['teacher_priority_score'],
+                    total_credits=item['total_credits'],
+                    details=details
+                ))
+            
+            if len(results) >= target_size:
+                break
+        
+        return results
+    
+    def _rank_tiered_by_time(self, scored_pool: List[Dict], target_size: int) -> List[TimetableSolution]:
+        """SCENARIO 4: BOTH - tier by teacher count, rank by time within tier."""
+        num_courses = len(self.courses)
+        results = []
+        
+        # Group by teacher match count (tier)
+        for tier in range(num_courses, -1, -1):
+            tier_items = [x for x in scored_pool if x['teacher_match_count'] == tier]
+            
+            # Sort by TIME score within tier (not teacher priority)
+            tier_items.sort(key=lambda x: x['time_score'], reverse=True)
+            
+            for item in tier_items:
+                if len(results) >= target_size:
+                    break
+                
+                details = self._build_solution_details(item['slots'])
+                details['method'] = 'tiered_time_ranked'
+                details['teacher_match_count'] = item['teacher_match_count']
+                details['time_score'] = round(item['time_score'], 2)
+                details['tier'] = tier
+                details['pool_size'] = len(scored_pool)
+                
+                results.append(TimetableSolution(
+                    slots=item['slots'],
+                    score=item['time_score'],
+                    total_credits=item['total_credits'],
+                    details=details
+                ))
+            
+            if len(results) >= target_size:
+                break
+        
+        return results
+
+    def apply_arc_consistency(self) -> bool:
+        """
+        AC-3 Algorithm: Reduce domains by removing slots that have no valid 
+        pairing with any slot of another course.
+        
+        Returns:
+            False if any course has empty domain (unsatisfiable), True otherwise.
+        """
+        if len(self.courses) < 2:
+            return True
+        
+        # Queue of arcs (course_id pairs) to process
+        queue = [(c1.id, c2.id) for c1 in self.courses for c2 in self.courses if c1.id != c2.id]
+        
+        while queue:
+            (c1_id, c2_id) = queue.pop(0)
+            if self._revise(c1_id, c2_id):
+                if not self.slot_map.get(c1_id):
+                    return False  # Domain wiped out - no solution
+                # Re-add neighbors to queue
+                for c3 in self.courses:
+                    if c3.id != c1_id and c3.id != c2_id:
+                        queue.append((c3.id, c1_id))
+        return True
+    
+    def _revise(self, c1_id: int, c2_id: int) -> bool:
+        """
+        Remove values from c1's domain that have no support in c2.
+        
+        Returns:
+            True if domain was revised (slots removed), False otherwise.
+        """
+        revised = False
+        slots_to_remove = []
+        
+        for slot1 in self.slot_map.get(c1_id, []):
+            has_support = False
+            for slot2 in self.slot_map.get(c2_id, []):
+                if not self._check_clash_fast(slot1.id, slot2.id):
+                    has_support = True
+                    break
+            if not has_support:
+                slots_to_remove.append(slot1)
+                revised = True
+        
+        for slot in slots_to_remove:
+            self.slot_map[c1_id].remove(slot)
+        
+        return revised
+
+    def generate_beam_search(self, beam_width: int = 100, target_size: int = 100) -> List[TimetableSolution]:
+        """
+        Beam search: Keep top-K partial solutions at each step.
+        More efficient than random sampling for finding high-quality solutions.
+        
+        Args:
+            beam_width: Number of partial solutions to keep at each level
+            target_size: Maximum number of complete solutions to return
+            
+        Returns:
+            List of TimetableSolution objects, sorted by score
+        """
+        if not self.courses:
+            return []
+        
+        # Apply constraint propagation first
+        if not self.apply_arc_consistency():
+            return []  # Unsatisfiable
+        
+        # Sort courses by constraint (fewer slots = process first for early pruning)
+        sorted_courses = sorted(self.courses, key=lambda c: len(self.slot_map.get(c.id, [])))
+        
+        if not sorted_courses:
+            return []
+        
+        # Initialize beams with first course's slots
+        # beam = (score, selected_slots, occupied_times)
+        beams: List[Tuple[float, List[Slot], Set[Tuple[str, int]]]] = []
+        first_course = sorted_courses[0]
+        
+        for slot in self.slot_map.get(first_course.id, [])[:beam_width * 2]:  # Start with more for diversity
+            score = self._score_slot(slot)
+            occupied = self._get_slot_timings(slot)
+            beams.append((score, [slot], occupied))
+        
+        # Sort and keep top beam_width
+        beams.sort(key=lambda x: x[0], reverse=True)
+        beams = beams[:beam_width]
+        
+        # Expand beam for each subsequent course
+        for course in sorted_courses[1:]:
+            new_beams: List[Tuple[float, List[Slot], Set[Tuple[str, int]]]] = []
+            available_slots = self.slot_map.get(course.id, [])
+            
+            for (score, selected, occupied) in beams:
+                for slot in available_slots:
+                    # Fast clash check using cached data
+                    if self._has_time_clash_with_occupied(slot, occupied):
+                        continue
+                    
+                    # Check against all selected slots using conflict matrix
+                    has_conflict = False
+                    for sel_slot in selected:
+                        if self._check_clash_fast(slot.id, sel_slot.id):
+                            has_conflict = True
+                            break
+                    
+                    if not has_conflict:
+                        new_score = score + self._score_slot(slot)
+                        new_occupied = occupied | self._get_slot_timings(slot)
+                        new_beams.append((new_score, selected + [slot], new_occupied))
+            
+            # Keep top beam_width candidates
+            new_beams.sort(key=lambda x: x[0], reverse=True)
+            beams = new_beams[:beam_width]
+            
+            if not beams:
+                break  # No valid solutions at this level
+        
+        # Convert complete solutions to TimetableSolutions
+        solutions = []
+        seen = set()
+        
+        for (score, slots, _) in beams:
+            if len(slots) != len(self.courses):
+                continue  # Incomplete solution
+                
+            sig = frozenset(s.id for s in slots)
+            if sig in seen:
+                continue
+            seen.add(sig)
+            
+            total_credits = sum(s.course.c for s in slots if s.course)
+            details = self._build_solution_details(slots)
+            details['method'] = 'beam_search'
+            
+            solutions.append(TimetableSolution(
+                slots=slots,
+                score=score,
+                total_credits=total_credits,
+                details=details
+            ))
+            
+            if len(solutions) >= target_size:
+                break
+        
+        return solutions
+    
+    def _build_solution_details(self, slots: List[Slot]) -> Dict:
+        """Build details dict for a solution."""
+        details = {
+            'preferred_faculty_matches': 0,
+            'gaps_per_day': {},
+            'saturday_classes': 0
+        }
+        
+        # Count preferred faculty matches
+        for slot in slots:
+            if slot.faculty and slot.course_id:
+                cid_str = str(slot.course_id)
+                if cid_str in self.preferences.course_faculty_preferences:
+                    if slot.faculty.name in self.preferences.course_faculty_preferences[cid_str]:
+                        details['preferred_faculty_matches'] += 1
+        
+        # Calculate gaps per day
+        day_periods: Dict[str, List[int]] = {}
+        for slot in slots:
+            for s in slot.get_individual_slots():
+                timing = get_slot_timing(s)
+                if timing:
+                    day = timing['day']
+                    if day not in day_periods:
+                        day_periods[day] = []
+                    day_periods[day].append(timing['period'])
+                    
+                    if day == 'SAT':
+                        details['saturday_classes'] += 1
+        
+        total_gaps = 0
+        for day, periods in day_periods.items():
+            periods.sort()
+            gaps = 0
+            for i in range(1, len(periods)):
+                gap = periods[i] - periods[i-1] - 1
+                if gap > 0:
+                    gaps += gap
+            details['gaps_per_day'][day] = gaps
+            total_gaps += gaps
+        
+        details['total_gaps'] = total_gaps
+        return details
 
     def generate_ranked_pool(self, target_size: int = 100, pool_attempts: int = 100000) -> List[TimetableSolution]:
         """
@@ -236,6 +1062,93 @@ class TimetableGenerator:
         scored_solutions.sort(key=lambda x: x.score, reverse=True)
         
         return scored_solutions[:target_size]
+
+    def generate_exhaustive(self, max_solutions: int = 20000, target_size: int = 100) -> List[TimetableSolution]:
+        """
+        Exhaustively generate ALL valid timetable combinations up to max_solutions.
+        
+        Use this when teacher preferences reduce the search space to a manageable size.
+        All solutions are scored and ranked, returning the top target_size results.
+        
+        Args:
+            max_solutions: Stop after finding this many solutions (safety limit)
+            target_size: Number of top solutions to return
+            
+        Returns:
+            List of TimetableSolution objects, sorted by score (best first)
+        """
+        if not self.courses:
+            return []
+        
+        all_solutions: List[List[Slot]] = []
+        seen_signatures = set()
+        
+        def backtrack(index: int, selected: List[Slot], occupied: Set[Tuple[str, int]]) -> None:
+            nonlocal all_solutions
+            
+            # Safety limit
+            if len(all_solutions) >= max_solutions:
+                return
+            
+            if index == len(self.courses):
+                # Found a complete solution - use slot IDs as signature to avoid duplicates
+                sig = frozenset(s.id for s in selected)
+                if sig not in seen_signatures:
+                    seen_signatures.add(sig)
+                    all_solutions.append(selected[:])  # Copy the list
+                return
+            
+            course = self.courses[index]
+            available_slots = self.slot_map.get(course.id, [])
+            
+            for slot in available_slots:
+                if len(all_solutions) >= max_solutions:
+                    return
+                
+                # Check clashes with previously selected slots
+                clashes = False
+                for existing in selected:
+                    if self._check_clash_fast(slot.id, existing.id):
+                        clashes = True
+                        break
+                
+                if not clashes:
+                    # Check time slot availability
+                    slot_timings = self._get_slot_timings(slot)
+                    if not (slot_timings & occupied):
+                        # No clash - proceed
+                        occupied.update(slot_timings)
+                        selected.append(slot)
+                        
+                        backtrack(index + 1, selected, occupied)
+                        
+                        selected.pop()
+                        occupied.difference_update(slot_timings)
+        
+        # Run exhaustive backtracking
+        backtrack(0, [], set())
+        
+        # Score and rank all solutions
+        scored_solutions = []
+        for slots in all_solutions:
+            score = self._calculate_solution_total_score(slots)
+            total_credits = sum(s.course.c if s.course else 0 for s in slots)
+            details = self._build_solution_details(slots)
+            details['method'] = 'exhaustive'
+            details['total_enumerated'] = len(all_solutions)
+            
+            scored_solutions.append(TimetableSolution(
+                slots=slots,
+                score=score,
+                total_credits=total_credits,
+                details=details
+            ))
+        
+        # Sort by score (highest first)
+        scored_solutions.sort(key=lambda x: x.score, reverse=True)
+        
+        return scored_solutions[:target_size]
+
 
     def _calculate_solution_total_score(self, slots: List[Slot]) -> float:
         """Calculate total quality score for a full timetable (Average of slot scores)."""
@@ -509,12 +1422,45 @@ class TimetableGenerator:
         # Average score for this slot group
         avg_score = total_cell_score / len(individual_slots)
         
+        # 3. Gap Heuristic: Penalize slots at extreme periods (likely to create gaps)
+        gap_penalty = self._estimate_gap_penalty(slot)
+        avg_score += gap_penalty
+        
         # Credit Weighting: Amplify score by course credits (e.g. 4 credits -> 4x score)
         credits = 1
         if slot.course and slot.course.c:
             credits = slot.course.c
             
         return avg_score * credits
+    
+    def _estimate_gap_penalty(self, slot: Slot) -> float:
+        """
+        Estimate gap penalty based on slot's position.
+        Slots at extreme periods (1, 7) without neighbors tend to create gaps.
+        Middle periods (3, 4, 5) are better for minimizing gaps.
+        
+        Returns:
+            Negative penalty value (deducted from score)
+        """
+        individual = slot.get_individual_slots()
+        if not individual:
+            return 0.0
+        
+        penalty = 0.0
+        
+        for s in individual:
+            timing = get_slot_timing(s)
+            if timing:
+                period = timing['period']
+                # Middle periods (3, 4, 5) are optimal for gap minimization
+                # P1 and P7 are most likely to create gaps
+                # Distance from middle (period 4): 0 for P4, 1 for P3/P5, 2 for P2/P6, 3 for P1/P7
+                distance_from_middle = abs(period - 4)
+                # Penalty: 8 points per period away from middle (max 24 for P1/P7)
+                penalty += distance_from_middle * 8
+        
+        # Return as negative (penalty reduces score)
+        return -penalty / len(individual)
     
     def _check_clash(self, slot1: Slot, slot2: Slot) -> bool:
         """Check if two slots clash (time overlap or mutual exclusion)."""
@@ -710,70 +1656,6 @@ class TimetableGenerator:
         solutions.sort(key=lambda s: s.score, reverse=True)
         return solutions
     
-    def count_solutions(self, max_count: int = 100000) -> int:
-        """
-        Count total valid timetable combinations without fully generating them.
-        
-        Args:
-            max_count: Stop counting after this many (for performance)
-            
-        Returns:
-            Number of valid combinations (capped at max_count)
-        """
-        if not self.courses:
-            return 0
-        
-        course_ids = [c.id for c in self.courses]
-        count = 0
-        
-        def backtrack(index: int, selected: List[Slot], occupied: Set[Tuple[str, int]]) -> None:
-            nonlocal count
-            
-            if count >= max_count:
-                return
-            
-            if index == len(course_ids):
-                count += 1
-                return
-            
-            course_id = course_ids[index]
-            available_slots = self.slot_map.get(course_id, [])
-            
-            for slot in available_slots:
-                if count >= max_count:
-                    return
-                    
-                # Check if this slot clashes with any already selected
-                clashes = False
-                for existing in selected:
-                    if self._check_clash(slot, existing):
-                        clashes = True
-                        break
-                
-                if not clashes:
-                    # Check time slot availability
-                    new_occupied = set()
-                    for s in slot.get_individual_slots():
-                        timing = get_slot_timing(s)
-                        if timing:
-                            key = (timing['day'], timing['period'])
-                            if key in occupied:
-                                clashes = True
-                                break
-                            new_occupied.add(key)
-                    
-                    if not clashes:
-                        selected.append(slot)
-                        occupied.update(new_occupied)
-                        
-                        backtrack(index + 1, selected, occupied)
-                        
-                        selected.pop()
-                        occupied.difference_update(new_occupied)
-        
-        backtrack(0, [], set())
-        return count
-
     def _get_timetable_signature(self, slots: List[Slot]) -> Tuple:
         """
         Create a signature for a timetable based on time distribution.

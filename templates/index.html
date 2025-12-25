@@ -93,15 +93,6 @@
             </ul>
         </div>
 
-        <!-- Auto Generate -->
-        <div class="auto-generate-panel">
-            <h3><i class="fas fa-magic"></i> Auto Generate</h3>
-            <p class="upload-hint">Generate optimal clash-free timetable</p>
-            <button type="button" class="btn btn-primary" onclick="openGenerateModal()">
-                <i class="fas fa-wand-magic-sparkles"></i> Generate Timetable
-            </button>
-        </div>
-
         <!-- HTML Upload -->
         <div class="upload-panel">
             <h3>
@@ -139,9 +130,14 @@
     <section class="timetable-section">
         <div class="timetable-header">
             <h2>Your Timetable</h2>
-            <button class="btn btn-primary print-btn" onclick="downloadTimetablePDF()" title="Download as PDF">
-                <i class="fas fa-file-pdf"></i> Download PDF
-            </button>
+            <div class="header-actions">
+                <a href="{{ url_for('generate.generate_page') }}" class="btn btn-success header-btn">
+                    <i class="fas fa-magic"></i> Auto Generate
+                </a>
+                <button class="btn btn-primary header-btn" onclick="downloadTimetablePDF()" title="Download as PDF">
+                    <i class="fas fa-file-pdf"></i> Download
+                </button>
+            </div>
             <div id="cellSelectionBar" class="cell-selection-bar" style="display: none;">
                 <span id="selectedCellsCount">0 slots selected</span>
                 <button type="button" class="btn btn-sm btn-secondary" onclick="clearCellSelection()">
@@ -169,9 +165,6 @@
 
 <!-- Faculty Selection Modal -->
 {% include "components/faculty_modal.html" %}
-
-<!-- Auto-Generate Timetable Modal -->
-{% include "components/generate_modal.html" %}
 
 <!-- Registered Courses Modal -->
 <div id="registeredModal" class="modal">
