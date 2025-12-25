@@ -2099,7 +2099,7 @@ function renderCurrentSavedCard() {
                         <button class="btn btn-danger btn-sm" onclick="deleteSavedTimetable('${item.id}')">
                             <i class="fas fa-trash"></i> Delete
                         </button>
-                        <button class="btn btn-success" onclick="applySavedTimetable(${JSON.stringify(slotIds)})">
+                        <button class="btn btn-success" onclick='applySavedTimetable(${JSON.stringify(slotIds)})'>
                             <i class="fas fa-check"></i> Apply Timetable
                         </button>
                     </div>
