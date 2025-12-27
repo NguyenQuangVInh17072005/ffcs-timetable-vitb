@@ -17,6 +17,17 @@
         gtag('config', 'G-F03ZLSX9P7');
     </script>
 
+    <!-- Structured Data for Site Name -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "FFCS VIT-B",
+        "alternateName": "VIT Bhopal FFCS Timetable Maker",
+        "url": "https://ffcs-timetable.vercel.app"
+    }
+    </script>
+
     <!-- SEO Meta Tags -->
     <meta name="description"
         content="VIT Bhopal FFCS Timetable Maker - The ultimate tool for planning your schedule with Smart Auto-Generation, AI Course Import, and Clash Detection. Save multiple timetables and export to PDF easily.">
@@ -40,7 +51,9 @@
     <title>{% block title %}VIT Bhopal FFCS Timetable Maker{% endblock %}</title>
 
     <!-- Favicon -->
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='favicon.ico') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='ffcs.svg') }}?v=2">
+    <link rel="shortcut icon" href="{{ url_for('static', filename='ffcs.svg') }}?v=2">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='ffcs.svg') }}?v=2">
 
     <!-- CSS -->
     <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">

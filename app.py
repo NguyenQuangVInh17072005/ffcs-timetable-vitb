@@ -47,37 +47,25 @@ def add_header(response):
     response.headers['Expires'] = '0'
     return response
 
-# Background Cleanup Task
+# Background Cleanup Task - ONLY for Guest data (preserves logged-in user data)
 import threading
 import time
 from datetime import datetime, timedelta, timezone
-from models import Course, User
+from models import Course
 
 import os
 
 def _perform_cleanup_logic():
-    """Core cleanup logic to delete old guest data."""
+    """Core cleanup logic to delete old GUEST data only. Logged-in user data is preserved forever."""
     try:
         with app.app_context():
-            # Define cutoff time (7 days ago for weekly reset)
-            # Use timezone-aware UTC
+            # Define cutoff time (7 days ago)
             cutoff = datetime.now(timezone.utc) - timedelta(days=7)
             
             deleted_count = 0
             
-            # 1. Delete old User accounts (cascades to Registrations)
-            old_users = User.query.filter(User.created_at < cutoff).all()
-            if old_users:
-                print(f"[{datetime.now()}] Cleanup: Deleting {len(old_users)} old users...")
-                for user in old_users:
-                    db.session.delete(user)
-                    deleted_count += 1
-            
-            # 2. Delete old Guest courses (Users courses are deleted via cascade above if user is deleted, 
-            #    but we might want to clean up courses for users who haven't expired yet? 
-            #    User asked to reset data after one week. If user is > 1 week, they go. 
-            #    If user is < 1 week, their data stays. This fits 'reset after one week'.
-            #    So we just need to handle Guest courses explicitly.)
+            # ONLY delete old Guest courses (courses with guest_id set)
+            # Logged-in user data (where user_id is set) is preserved forever
             old_guest_courses = Course.query.filter(
                 Course.guest_id.isnot(None), 
                 Course.created_at < cutoff
@@ -91,7 +79,7 @@ def _perform_cleanup_logic():
             
             if deleted_count > 0:
                 db.session.commit()
-                print(f"[{datetime.now()}] Cleanup complete. Total items deleted: {deleted_count}")
+                print(f"[{datetime.now()}] Cleanup complete. Guest items deleted: {deleted_count}")
                 return deleted_count
             
             return 0
@@ -108,12 +96,11 @@ def cleanup_orphaned_data():
 
 @app.route('/api/cron/cleanup')
 def trigger_cleanup():
-    """Endpoint for Serverless Cron Jobs."""
+    """Endpoint for Serverless Cron Jobs - cleans GUEST data only."""
     count = _perform_cleanup_logic()
     return {'status': 'success', 'deleted_count': count}
 
 # Start cleanup thread ONLY if not on Vercel
-# Vercel serverless functions cannot handle background threads (they timeout/crash)
 if not os.environ.get('VERCEL'):
     cleanup_thread = threading.Thread(target=cleanup_orphaned_data, daemon=True)
     cleanup_thread.start()
